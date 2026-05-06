@@ -1057,29 +1057,34 @@ VIKTIGE REGLER FOR ADVARSLER:
 
 OPPGAVE 3+4: AKSJONSPUNKTER OG BESLUTNINGER (GJENSIDIG UTELUKKENDE)
 
-VIKTIG: Hvert utsagn fra transkriptet skal kun havne ÉN plass — enten som aksjonspunkt ELLER som beslutning, aldri begge. Du må ta en aktiv vurdering.
+LES TRANSKRIPTET SOM SAMMENHENGENDE TEKST. Hvert "Taler X"-segment er ofte kuttet midt i en setning fordi lyden chunkes hvert 28. sekund — to påfølgende segmenter med kort tidsavstand er som regel én ytring. Eksempel: "Vi har i ledergruppen besluttet." + "At i uke 22 skal alle gå med gummistøvler på jobben." = én komplett beslutning. Ikke behandle dem som adskilte løsrevne setninger.
 
-Klassifiseringsregel:
-- BESLUTNING = noe gruppen ble enige om eller har konkludert (ingenting gjenstår å gjøre for at "saken er bestemt"). Eksempler: "Vi velger leverandør A", "Møtet flyttes til onsdag", "Prosjektleder får ansvar for X".
-- AKSJONSPUNKT = noe konkret som SKAL UTFØRES av noen i fremtiden. Eksempler: "Hente inn priser", "Sende rapport til kunde", "Avklare med juridisk".
-- Hvis et utsagn både inneholder en beslutning OG en handling som følger av den (f.eks. "Vi bestemmer at Per sender rapporten innen fredag"), del det opp: lag ÉN beslutning ("Per får ansvaret for rapporten") OG ÉN aksjon ("Sende rapport innen fredag, ansvarlig: Per"). Da er innholdet komplementært, ikke duplisert.
-- Hvis du er i tvil mellom beslutning og aksjon: spør om setningen er en KONSTATERING (beslutning) eller en INSTRUKSJON/OPPGAVE (aksjon). Brukeren kan flytte mellom kategoriene etterpå hvis du tar feil.
+KLASSIFISERINGSREGEL — hvert utsagn havner kun ÉN plass:
+- BESLUTNING = en KONSTATERING av noe avgjort (saken er bestemt, ingenting gjenstår å bli enig om). Triggerord: "besluttet", "vedtatt", "vi har bestemt", "vi er enige om", "konkluderer med", "fastsatt", "vedtak". Hvis transkriptet inneholder eksplisitte beslutningsord MÅ du fange beslutningen — det er ikke en aksjon for "å avklare hva som er besluttet".
+- AKSJONSPUNKT = en KONKRET OPPGAVE noen skal utføre i fremtiden. Triggerord: "skal gjøre", "kan du", "må vi", "vi trenger å", "innen [dato]", åpne spørsmål som ikke ble besvart.
+- Tommelfingerregel: hvis utsagnet beskriver et VEDTAK (datidsform, "har besluttet") → beslutning. Hvis det beskriver et VERB i fremtid eller et UBESVART SPØRSMÅL → aksjon.
+- Hvis ett utsagn inneholder begge ("Vi bestemmer at Per sender rapporten innen fredag"): split i komplementære deler — beslutning ("Per får ansvar for rapporten") + aksjon ("Sende rapport innen fredag, ansvarlig: Per"). Ikke dupliser.
 
-AKSJONSPUNKTER:
-- Inkluder BÅDE eksplisitte oppgaver ("vi må...") OG implisitte (åpne spørsmål som ikke ble besvart, ting som trengte mer avklaring, tall som må finnes).
-- Beskriv som konkret oppgave med verb: "Hente inn...", "Avklare...", "Undersøke...", "Bekrefte...", "Planlegge besøk til...", etc.
-- Forsøk å finne hvem som er ansvarlig (person/rolle nevnt i transkript) og eventuelle frister.
-- DEDUPLICERING: Hvis et nytt aksjonspunkt handler om det SAMME som et eksisterende (se EKSISTERENDE AKSJONSPUNKTER over), GJENBRUK den eksisterende IDen og oppdater tekst/ansvarlig/frist. IKKE lag et nytt aksjonspunkt for det samme temaet.
-- Sjekk også EKSISTERENDE BESLUTNINGER — hvis det du vurderer som aksjon allerede står som beslutning der, må du IKKE foreslå det som aksjon i tillegg. La det stå som beslutning (brukeren flytter selv hvis de mener det er feil).
-- Returner opptil 6 aksjonspunkter.
+VIKTIG ANTI-PATTERN — IKKE lag aksjoner som er meta-spørsmål om beslutningen:
+- ❌ "Avklare hva ledergruppen har besluttet" når transkriptet allerede sier hva de besluttet
+- ❌ "Bekrefte at Per tar ansvar for X" når Per er nevnt som ansvarlig — registrer det isteden direkte
+- ✅ Fang den FAKTISKE beslutningen som beslutning ("Alle skal gå med gummistøvler i uke 22"), ikke som "avklar hva som er besluttet"
 
 BESLUTNINGER:
-- Inkluder BÅDE eksplisitte ("vi beslutter at...", "ok, da gjør vi slik") OG implisitte (enighet som kom frem gjennom diskusjonen).
-- Skriv som konstatering: "Grupperom A velges fremfor alternativ B", "Prosjektleder får ansvar for..."
-- Legg ved et kort sitat/kontekst fra transkriptet som viser at beslutningen ble tatt.
-- DEDUPLICERING: Hvis en ny beslutning handler om det SAMME som en eksisterende (se EKSISTERENDE BESLUTNINGER over), GJENBRUK den eksisterende IDen og oppdater tekst/kontekst.
-- Sjekk også EKSISTERENDE AKSJONSPUNKTER — hvis det du vurderer som beslutning allerede står som aksjon der, må du IKKE foreslå det som beslutning i tillegg.
-- Returner opptil 4 beslutninger.
+- Skriv som direkte konstatering, ikke meta: "Alle ansatte skal bruke gummistøvler på jobben i uke 22" (IKKE "Bestemt at man må avklare gummistøvler")
+- Inkluder eksplisitte beslutninger ("vi beslutter at...", "har besluttet", "vedtatt") OG implisitte (tydelig enighet, "ok, da gjør vi slik")
+- Legg ved et kort sitat/kontekst fra transkriptet
+- DEDUPLICERING: Hvis en ny beslutning handler om det SAMME som en eksisterende (se EKSISTERENDE BESLUTNINGER over), GJENBRUK eksisterende IDen og oppdater
+- Sjekk EKSISTERENDE AKSJONSPUNKTER — hvis det allerede står som aksjon, ikke foreslå det som beslutning i tillegg
+- Returner opptil 4 beslutninger
+
+AKSJONSPUNKTER:
+- Skriv som konkret OPPGAVE, ikke som meta-avklaring: "Per og Pål skriver 15-siders rapport innen mandag" (IKKE "Bekrefte at Per og Pål tar ansvar for å skrive...")
+- Bruk substansen direkte fra transkriptet — hvis transkriptet sier "Kan Per og Pål skrive en rapport innen mandag?", aksjonen er "Per og Pål skriver rapport, frist: mandag" (ikke "bekrefte at de tar ansvar")
+- Inkluder eksplisitte oppgaver OG implisitte (åpne spørsmål, ubesvarte tall, ting som trengte avklaring)
+- Finn ansvarlig person og frist om nevnt
+- DEDUPLICERING: Sjekk EKSISTERENDE AKSJONSPUNKTER og EKSISTERENDE BESLUTNINGER. Ikke foreslå samme tema dobbelt.
+- Returner opptil 6 aksjonspunkter
 
 Returner ALLTID gyldig JSON i dette formatet:
 {
