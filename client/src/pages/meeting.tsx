@@ -3163,6 +3163,15 @@ export default function MeetingPage() {
                     <span className="ml-2 text-xs text-muted-foreground">{meetingKnowledgeDocs.length}</span>
                   )}
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={logout}
+                  data-testid="button-logout-desktop"
+                  className="text-muted-foreground"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logg ut
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
