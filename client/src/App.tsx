@@ -41,9 +41,12 @@ function AuthenticatedRouter() {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
   
+  // Authenticated users hitting /login (e.g. via stale bookmark) should go
+  // to the meeting page, not see a 404.
   return (
     <Switch>
       <Route path="/" component={MeetingPage} />
+      <Route path="/login" component={MeetingPage} />
       <Route component={NotFound} />
     </Switch>
   );

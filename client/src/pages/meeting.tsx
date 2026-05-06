@@ -67,6 +67,9 @@ import {
   Mic2,
   RotateCw,
   Replace,
+  Calendar,
+  Wrench,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { TranscriptSegment, Question, ActionItem, ProposedDecision, MeetingState, MeetingMeta, ExpertRole, Warning, ExtractedRule, UploadedDocument, SeriesSummary, MeetingSeriesRow, MeetingDocument, WordCorrection } from "@shared/schema";
@@ -80,6 +83,16 @@ import SummaryWysiwygEditor, { type SummaryWysiwygEditorRef } from "@/components
 import { AlertTriangle, FileWarning, BookOpen, ChevronDown, ChevronUp, Lightbulb, PenLine, ListOrdered } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu";
 
 const STORAGE_KEY = "meeting-transcription-state";
 
@@ -1252,17 +1265,29 @@ export default function MeetingPage() {
     } catch (error: any) {
       console.error("Mikrofonfeil:", error);
       setIsStartingRecording(false);
-      let errorMsg = "Mikrofontilgang nektet. Vennligst gi tillatelse til å bruke mikrofonen.";
-      if (error?.message) errorMsg = error.message;
-      else if (error?.name === "NotAllowedError") errorMsg = "Mikrofontilgang nektet. Åpne nettleserinnstillinger og gi tillatelse til mikrofon for denne siden.";
-      else if (error?.name === "NotFoundError") errorMsg = "Ingen mikrofon funnet. Sjekk at mikrofonen er koblet til.";
-      else if (error?.name === "NotReadableError") errorMsg = "Mikrofonen er i bruk av et annet program. Lukk andre apper som bruker mikrofon og prøv igjen.";
+      // Norske, handlingsrettede feilmeldinger basert på error.name først.
+      // (error.message er ofte engelsk: "Permission denied", "Permission dismissed".)
+      let errorMsg: string;
+      const isMac = /Mac|iPhone|iPad/i.test(navigator.platform);
+      if (error?.name === "NotAllowedError" || /denied|dismissed/i.test(error?.message ?? "")) {
+        errorMsg = isMac
+          ? "Mikrofontilgang er blokkert. Klikk på 🔒-ikonet i adresselinjen og tillat mikrofon, eller gå til Systeminnstillinger → Personvern og sikkerhet → Mikrofon → tillat Chrome."
+          : "Mikrofontilgang er blokkert. Klikk på 🔒-ikonet i adresselinjen og velg «Tillat» for mikrofon, deretter last siden på nytt.";
+      } else if (error?.name === "NotFoundError") {
+        errorMsg = "Ingen mikrofon funnet. Sjekk at en mikrofon er koblet til datamaskinen.";
+      } else if (error?.name === "NotReadableError") {
+        errorMsg = "Mikrofonen er i bruk av et annet program (f.eks. Zoom eller Teams). Lukk det og prøv igjen.";
+      } else if (error?.message) {
+        errorMsg = error.message;
+      } else {
+        errorMsg = "Kunne ikke få tilgang til mikrofonen. Sjekk at den er koblet til og at du har gitt tillatelse.";
+      }
       setMicrophoneError(errorMsg);
       toast({
         title: "Kunne ikke starte opptak",
         description: errorMsg,
         variant: "destructive",
-        duration: 8000,
+        duration: 10000,
       });
     }
   };
@@ -2067,10 +2092,10 @@ export default function MeetingPage() {
   const logout = async () => {
     try {
       await apiRequest("POST", "/api/auth/logout");
-      window.location.href = "/login";
+      window.location.href = "/";
     } catch (error) {
       console.error("Logout error:", error);
-      window.location.href = "/login";
+      window.location.href = "/";
     }
   };
 
@@ -2889,258 +2914,202 @@ export default function MeetingPage() {
             )}
           </div>
           
-          {/* Desktop controls - hidden on mobile */}
+          {/* Desktop controls — slank header med menyer */}
           <TooltipProvider delayDuration={400}>
           <div className="hidden lg:flex items-center gap-2">
-            {/* Expert role + interval selectors */}
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1">
-                    <Brain className="h-4 w-4 text-muted-foreground" />
-                    <Select 
-                      value={expertRole} 
-                      onValueChange={(value) => setExpertRole(value as ExpertRole)}
-                    >
-                      <SelectTrigger className="w-[150px]" data-testid="select-expert-role-desktop">
-                        <SelectValue placeholder="Velg ekspert" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="bygg">Bygg & Prosjekt</SelectItem>
-                        <SelectItem value="hr">HR & Arbeidsmiljø</SelectItem>
-                        <SelectItem value="jus">Jus & Kontrakt</SelectItem>
-                        <SelectItem value="uformell">Djevelens advokat</SelectItem>
-                        <SelectItem value="pappa">Pappa-vitser</SelectItem>
-                        <SelectItem value="sureaud">Sure-Aud</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>AI-ekspertprofil for spørsmålsgenerering</TooltipContent>
-              </Tooltip>
-            </div>
-            
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1">
-                    <Timer className="h-4 w-4 text-muted-foreground" />
-                    <Select 
-                      value={questionInterval.toString()} 
-                      onValueChange={(value) => setQuestionInterval(parseInt(value))}
-                    >
-                      <SelectTrigger className="w-[120px]" data-testid="select-interval-desktop">
-                        <SelectValue placeholder="Intervall" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">Hvert minutt</SelectItem>
-                        <SelectItem value="5">Hvert 5. min</SelectItem>
-                        <SelectItem value="15">Hvert 15. min</SelectItem>
-                        <SelectItem value="0">Kun manuelt</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>Hvor ofte AI skal generere spørsmål automatisk</TooltipContent>
-              </Tooltip>
-            </div>
+            {/* Ekspertrolle — alltid synlig (mest brukt) */}
+            <Select
+              value={expertRole}
+              onValueChange={(value) => setExpertRole(value as ExpertRole)}
+            >
+              <SelectTrigger className="w-[170px] h-9" data-testid="select-expert-role-desktop">
+                <Brain className="h-4 w-4 mr-1 text-muted-foreground" />
+                <SelectValue placeholder="Velg ekspert" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bygg">Bygg & Prosjekt</SelectItem>
+                <SelectItem value="hr">HR & Arbeidsmiljø</SelectItem>
+                <SelectItem value="jus">Jus & Kontrakt</SelectItem>
+                <SelectItem value="uformell">Djevelens advokat</SelectItem>
+                <SelectItem value="pappa">Pappa-vitser</SelectItem>
+                <SelectItem value="sureaud">Sure-Aud</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1">
-                    <Mic className="h-4 w-4 text-muted-foreground" />
-                    <Select
-                      value={transcriptionModel}
-                      onValueChange={(v) => setTranscriptionModel(v as "medium" | "large" | "openai")}
-                      disabled={isRecording}
-                    >
-                      <SelectTrigger className="w-[110px]" data-testid="select-transcription-model-desktop">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="medium">🇳🇴 Medium</SelectItem>
-                        <SelectItem value="large">🇳🇴 Large</SelectItem>
-                        <SelectItem value="openai">⚡ OpenAI</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>Transkripsjonmodell (kan ikke byttes under opptak)</TooltipContent>
-              </Tooltip>
-            </div>
-            
             <div className="w-px h-5 bg-border" />
 
-            {/* Meeting management */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="default"
+            {/* Møte-meny: alle handlinger som gjelder selve møtet */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="default" className="gap-2 h-9" data-testid="menu-meeting">
+                  <Calendar className="h-4 w-4" />
+                  Møte
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>Dette møtet</DropdownMenuLabel>
+                <DropdownMenuItem
                   onClick={newMeeting}
                   disabled={isRecording}
-                  className="gap-2"
                   data-testid="button-new-meeting"
                 >
-                  <FilePlus2 className="h-4 w-4" />
+                  <FilePlus2 className="h-4 w-4 mr-2" />
                   Nytt møte
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Start et nytt tomt møte</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="default"
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={openSaveDialog}
                   disabled={isSavingSession || (transcript.length === 0 && questions.length === 0)}
-                  className="gap-2"
                   data-testid="button-save-session-desktop"
                 >
                   {isSavingSession ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
-                    <Save className="h-4 w-4" />
+                    <Save className="h-4 w-4 mr-2" />
                   )}
-                  {sessionId ? "Oppdater" : "Lagre"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{sessionId ? `Oppdater "${sessionTitle}"` : "Lagre møtet til databasen"}</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="default"
+                  {sessionId ? `Oppdater "${sessionTitle || "møtet"}"` : "Lagre møtet"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={() => setShowSessionsDialog(true)}
-                  className="gap-2"
                   data-testid="button-sessions-desktop"
                 >
-                  <History className="h-4 w-4" />
-                  Møter
+                  <History className="h-4 w-4 mr-2" />
+                  Tidligere møter
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Lyd og innhold</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => setShowAudioUploadDialog(true)}
+                  data-testid="button-audio-upload-desktop"
+                >
+                  <Mic2 className="h-4 w-4 mr-2" />
+                  Importer lydopptak
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={exportTranscriptAsTxt}
+                  disabled={transcript.length === 0}
+                  data-testid="button-export-transcript"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Eksporter transkript (.txt)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={generateSummary}
+                  disabled={transcript.length === 0 || isGeneratingSummary}
+                  data-testid="button-generate-summary"
+                >
+                  {isGeneratingSummary ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <ScrollText className="h-4 w-4 mr-2" />
+                  )}
+                  {isGeneratingSummary ? "Genererer referat…" : meetingSummary ? "Vis møtereferat" : "Lag møtereferat"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Verktøy-meny: AI-instillinger og kunnskapsbaser */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="default" className="gap-2 h-9 relative" data-testid="menu-tools">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Verktøy
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                  {(ruleCount > 0 || wordCorrectionsList.length > 0 || meetingKnowledgeDocs.length > 0) && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                      {ruleCount + wordCorrectionsList.length + meetingKnowledgeDocs.length}
+                    </span>
+                  )}
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>Se og last inn tidligere lagrede møter</TooltipContent>
-            </Tooltip>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Generate */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="default"
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel>AI-handlinger</DropdownMenuLabel>
+                <DropdownMenuItem
                   onClick={handleManualGenerate}
                   disabled={transcript.length === 0 || isGeneratingQuestions}
-                  className="gap-2"
                   data-testid="button-generate-now"
                 >
                   {isGeneratingQuestions ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
-                    <Sparkles className="h-4 w-4" />
+                    <Sparkles className="h-4 w-4 mr-2" />
                   )}
-                  Generer nå
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Generer spørsmål basert på hele transkriptet</TooltipContent>
-            </Tooltip>
-            
-            <div className="w-px h-5 bg-border" />
-
-            {/* Audio tools */}
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={() => setShowAudioUploadDialog(true)} data-testid="button-audio-upload-desktop">
-                    <Mic2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Importer lydopptak for transkripsjon</TooltipContent>
-              </Tooltip>
-
-            </div>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Output tools */}
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={exportTranscriptAsTxt} disabled={transcript.length === 0} data-testid="button-export-transcript">
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Eksporter transkript som TXT</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={generateSummary} disabled={transcript.length === 0 || isGeneratingSummary} data-testid="button-generate-summary">
-                    {isGeneratingSummary ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScrollText className="h-4 w-4" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{isGeneratingSummary ? "Genererer referat..." : meetingSummary ? "Vis møtereferat" : "Lag møtereferat"}</TooltipContent>
-              </Tooltip>
-            </div>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Config tools */}
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={() => setShowRulesDialog(true)} data-testid="button-rules-desktop" className="relative">
-                    <BookOpen className="h-4 w-4" />
-                    {ruleCount > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
-                        {ruleCount}
-                      </span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Regeldokumenter ({ruleCount} regler lastet)</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={() => setShowWordCorrectionsDialog(true)} data-testid="button-word-corrections-desktop" className="relative">
-                    <Replace className="h-4 w-4" />
-                    {wordCorrectionsList.length > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] text-white">
-                        {wordCorrectionsList.length}
-                      </span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Ordkorrigeringer ({wordCorrectionsList.length} aktive)</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => { fetchMeetingKnowledgeDocs(); setShowMeetingDocsDialog(true); }}
-                    data-testid="button-meeting-docs-desktop"
-                    className="relative"
+                  Generer spørsmål nå
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>AI-innstillinger</DropdownMenuLabel>
+                <div className="px-2 py-1.5">
+                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                    <Timer className="h-3 w-3" /> Spørsmålsintervall
+                  </div>
+                  <Select
+                    value={questionInterval.toString()}
+                    onValueChange={(value) => setQuestionInterval(parseInt(value))}
                   >
-                    <FolderOpen className="h-4 w-4" />
-                    {meetingKnowledgeDocs.length > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white">
-                        {meetingKnowledgeDocs.length}
-                      </span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Møtedokumenter ({meetingKnowledgeDocs.length} lastet opp)</TooltipContent>
-              </Tooltip>
-            </div>
+                    <SelectTrigger className="w-full h-8" data-testid="select-interval-desktop">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Hvert minutt</SelectItem>
+                      <SelectItem value="5">Hvert 5. minutt</SelectItem>
+                      <SelectItem value="15">Hvert 15. minutt</SelectItem>
+                      <SelectItem value="0">Kun manuelt</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="px-2 py-1.5">
+                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                    <Mic className="h-3 w-3" /> Transkripsjonsmodell
+                  </div>
+                  <Select
+                    value={transcriptionModel}
+                    onValueChange={(v) => setTranscriptionModel(v as "medium" | "large" | "openai")}
+                    disabled={isRecording}
+                  >
+                    <SelectTrigger className="w-full h-8" data-testid="select-transcription-model-desktop">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="medium">🇳🇴 nb-whisper Medium</SelectItem>
+                      <SelectItem value="large">🇳🇴 nb-whisper Large</SelectItem>
+                      <SelectItem value="openai">⚡ OpenAI Whisper</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Kunnskapsbaser</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => setShowRulesDialog(true)}
+                  data-testid="button-rules-desktop"
+                >
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  <span className="flex-1">Regeldokumenter</span>
+                  {ruleCount > 0 && (
+                    <span className="ml-2 text-xs text-muted-foreground">{ruleCount}</span>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setShowWordCorrectionsDialog(true)}
+                  data-testid="button-word-corrections-desktop"
+                >
+                  <Replace className="h-4 w-4 mr-2" />
+                  <span className="flex-1">Ordkorrigeringer</span>
+                  {wordCorrectionsList.length > 0 && (
+                    <span className="ml-2 text-xs text-muted-foreground">{wordCorrectionsList.length}</span>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => { fetchMeetingKnowledgeDocs(); setShowMeetingDocsDialog(true); }}
+                  data-testid="button-meeting-docs-desktop"
+                >
+                  <FolderOpen className="h-4 w-4 mr-2" />
+                  <span className="flex-1">Møtedokumenter</span>
+                  {meetingKnowledgeDocs.length > 0 && (
+                    <span className="ml-2 text-xs text-muted-foreground">{meetingKnowledgeDocs.length}</span>
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           </TooltipProvider>
           
@@ -3739,10 +3708,47 @@ export default function MeetingPage() {
                               <p className="text-muted-foreground italic">Lytter etter tale...</p>
                             </>
                           ) : (
-                            <>
-                              <Mic className="h-12 w-12 text-muted-foreground/50" />
-                              <p className="text-muted-foreground italic">Trykk "Start møte" for å begynne transkripsjonen</p>
-                            </>
+                            <div className="flex flex-col items-center gap-6 max-w-md">
+                              <div className="rounded-full bg-primary/10 p-5">
+                                <Mic className="h-10 w-10 text-primary" />
+                              </div>
+                              <div className="text-center space-y-1">
+                                <h3 className="text-base font-semibold">Klar til å starte møtet</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  Følg disse stegene for å komme i gang
+                                </p>
+                              </div>
+                              <ol className="w-full space-y-3 text-sm">
+                                <li className="flex items-start gap-3">
+                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">1</span>
+                                  <div>
+                                    <div className="font-medium">Velg ekspertrolle</div>
+                                    <div className="text-muted-foreground text-xs">
+                                      Du har valgt: <span className="font-medium text-foreground">{expertRoleLabels[expertRole]}</span>
+                                    </div>
+                                  </div>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">2</span>
+                                  <div>
+                                    <div className="font-medium">Trykk på <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-medium">🎤 Start møte</kbd></div>
+                                    <div className="text-muted-foreground text-xs">Tillat mikrofontilgang når nettleseren spør</div>
+                                  </div>
+                                </li>
+                                <li className="flex items-start gap-3">
+                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">3</span>
+                                  <div>
+                                    <div className="font-medium">AI lytter og foreslår spørsmål</div>
+                                    <div className="text-muted-foreground text-xs">
+                                      Hvert minutt får du 3 oppfølgingsspørsmål basert på samtalen
+                                    </div>
+                                  </div>
+                                </li>
+                              </ol>
+                              <p className="text-xs text-muted-foreground text-center">
+                                Tips: Bruk <span className="font-medium">Verktøy</span>-menyen for å laste opp regeldokumenter eller endre intervall.
+                              </p>
+                            </div>
                           )}
                         </div>
                       ) : (
