@@ -80,7 +80,7 @@ import { marked } from "marked";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import SummaryWysiwygEditor, { type SummaryWysiwygEditorRef } from "@/components/SummaryWysiwygEditor";
-import { AlertTriangle, FileWarning, BookOpen, ChevronDown, ChevronUp, Lightbulb, PenLine, ListOrdered } from "lucide-react";
+import { AlertTriangle, FileWarning, BookOpen, ChevronDown, ChevronUp, Lightbulb, PenLine, ListOrdered, ArrowRightLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -1175,6 +1175,46 @@ export default function MeetingPage() {
 
   const removeConfirmedDecision = (decisionId: string) => {
     setProposedDecisions(prev => prev.filter(d => d.id !== decisionId));
+  };
+
+  // Move an action over to the decisions column. Carries the text + owner
+  // along; resets to "proposed" so the user can confirm it as a decision.
+  const moveActionToDecision = (actionId: string) => {
+    const action = proposedActions.find(a => a.id === actionId);
+    if (!action) return;
+    const moved: ProposedDecision = {
+      id: `d-moved-${Date.now()}`,
+      text: action.text,
+      context: action.suggestedDeadline ? `Frist: ${action.suggestedDeadline}` : undefined,
+      owner: action.owner || action.suggestedOwner || undefined,
+      status: "proposed" as const,
+      source: action.source ?? "ai",
+      minuteIndex: action.minuteIndex,
+      createdAt: new Date().toISOString(),
+    };
+    setProposedActions(prev => prev.filter(a => a.id !== actionId));
+    setProposedDecisions(prev => [...prev, moved]);
+    toast({ title: "Flyttet til beslutninger", description: action.text });
+  };
+
+  const moveDecisionToAction = (decisionId: string) => {
+    const decision = proposedDecisions.find(d => d.id === decisionId);
+    if (!decision) return;
+    const moved: ActionItem = {
+      id: `a-moved-${Date.now()}`,
+      text: decision.text,
+      suggestedOwner: decision.owner ?? null,
+      suggestedDeadline: null,
+      status: "proposed" as const,
+      source: decision.source ?? "ai",
+      owner: decision.owner,
+      deadline: undefined,
+      minuteIndex: decision.minuteIndex,
+      createdAt: new Date().toISOString(),
+    };
+    setProposedDecisions(prev => prev.filter(d => d.id !== decisionId));
+    setProposedActions(prev => [...prev, moved]);
+    toast({ title: "Flyttet til aksjoner", description: decision.text });
   };
 
   useEffect(() => {
@@ -3539,9 +3579,12 @@ export default function MeetingPage() {
                             {action.suggestedDeadline && <span className="flex items-center gap-1"><CalendarDays className="h-2.5 w-2.5" />{action.suggestedDeadline}</span>}
                           </div>
                         )}
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-1.5 flex-wrap">
                           <Button size="sm" variant="outline" onClick={() => startApproval(action)} className="h-6 text-[10px] px-2 gap-1 border-green-500 text-green-700 dark:text-green-400">
                             <CircleCheck className="h-2.5 w-2.5" /> Godkjenn
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => moveActionToDecision(action.id)} className="h-6 text-[10px] px-2 gap-1 text-purple-700 dark:text-purple-400" data-testid="button-move-to-decision-mobile">
+                            <ArrowRightLeft className="h-2.5 w-2.5" /> Til beslutning
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => rejectAction(action.id)} className="h-6 text-[10px] px-2 gap-1 text-muted-foreground">
                             <CircleX className="h-2.5 w-2.5" /> Avvis
@@ -3551,7 +3594,7 @@ export default function MeetingPage() {
                     ))}
                   </div>
                 )}
-                
+
                 {/* Approved actions - mobile */}
                 <div className="space-y-1.5 pb-2 border-b border-green-300/50">
                     <div className="flex items-center justify-between gap-2 text-green-700 dark:text-green-400 text-xs font-medium">
@@ -3601,9 +3644,12 @@ export default function MeetingPage() {
                       <div key={decision.id} className="p-2 rounded-md text-xs bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800" data-testid={`mobile-decision-${decision.id}`}>
                         <p className="font-medium mb-1 leading-snug">{decision.text}</p>
                         {decision.context && <p className="text-muted-foreground italic mb-1.5 text-[10px]">"{decision.context}"</p>}
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-1.5 flex-wrap">
                           <Button size="sm" variant="outline" onClick={() => confirmDecision(decision)} className="h-6 text-[10px] px-2 gap-1 border-purple-500 text-purple-700 dark:text-purple-400">
                             <CircleCheck className="h-2.5 w-2.5" /> Bekreft
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => moveDecisionToAction(decision.id)} className="h-6 text-[10px] px-2 gap-1 text-green-700 dark:text-green-400" data-testid="button-move-to-action-mobile">
+                            <ArrowRightLeft className="h-2.5 w-2.5" /> Til aksjon
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => rejectDecision(decision.id)} className="h-6 text-[10px] px-2 gap-1 text-muted-foreground">
                             <CircleX className="h-2.5 w-2.5" /> Avvis
@@ -3985,7 +4031,7 @@ export default function MeetingPage() {
                                   )}
                                 </div>
                               )}
-                              <div className="flex gap-2">
+                              <div className="flex gap-2 flex-wrap">
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -3995,6 +4041,17 @@ export default function MeetingPage() {
                                 >
                                   <CircleCheck className="h-3 w-3" />
                                   Godkjenn
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => moveActionToDecision(action.id)}
+                                  className="h-7 text-xs gap-1 text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30"
+                                  data-testid={`move-action-to-decision-${action.id}`}
+                                  title="Flytt til beslutninger"
+                                >
+                                  <ArrowRightLeft className="h-3 w-3" />
+                                  Til beslutning
                                 </Button>
                                 <Button
                                   size="sm"
@@ -4134,7 +4191,7 @@ export default function MeetingPage() {
                             <div key={decision.id} className="p-3 rounded-md border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/30" data-testid={`decision-${decision.id}`}>
                               <p className="text-sm font-medium mb-1 leading-snug">{decision.text}</p>
                               {decision.context && <p className="text-xs text-muted-foreground italic mb-2">"{decision.context}"</p>}
-                              <div className="flex gap-2">
+                              <div className="flex gap-2 flex-wrap">
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -4144,6 +4201,17 @@ export default function MeetingPage() {
                                 >
                                   <CircleCheck className="h-3 w-3" />
                                   Bekreft
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => moveDecisionToAction(decision.id)}
+                                  className="h-7 text-xs gap-1 text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/30"
+                                  data-testid={`move-decision-to-action-${decision.id}`}
+                                  title="Flytt til aksjonspunkter"
+                                >
+                                  <ArrowRightLeft className="h-3 w-3" />
+                                  Til aksjon
                                 </Button>
                                 <Button
                                   size="sm"

@@ -1055,24 +1055,31 @@ VIKTIGE REGLER FOR ADVARSLER:
 - Ved usikkerhet, klassifiser som "risk"
 - Ved klar motsetning, klassifiser som "violation"
 
-OPPGAVE 3: AKSJONSPUNKTER
-Se igjennom recent_transcript og identifiser potensielle aksjonspunkter – konkrete ting som skal gjøres, innhentes, avklares, besluttes eller følges opp.
-- Inkluder BÅDE eksplisitte oppgaver (noen sier direkte "vi må...") OG implisitte (åpne spørsmål som ikke ble besvart, ting som trengte mer avklaring, tall som må finnes, beslutninger som ble utsatt).
-- Vær raus – det er bedre å foreslå for mange enn for få. Brukeren godkjenner eller avviser selv.
-- Beskriv hvert aksjonspunkt som en konkret oppgave med verb: "Hente inn...", "Avklare...", "Undersøke...", "Bekrefte...", "Planlegge besøk til...", etc.
-- Forsøk å finne hvem som er ansvarlig (person/rolle nevnt i transkript) og eventuelle frister.
-- DEDUPLICERING: Hvis et nytt aksjonspunkt handler om det SAMME som et eksisterende (se EKSISTERENDE AKSJONSPUNKTER over), GJENBRUK den eksisterende IDen og oppdater tekst/ansvarlig/frist med mer detaljert informasjon. IKKE lag et nytt aksjonspunkt for det samme temaet.
-- Returner opptil 6 aksjonspunkter – prioritér de viktigste, men utelat ikke relevante implisitte oppgaver.
-- Returner tom liste KUN hvis absolutt ingenting kan følges opp.
+OPPGAVE 3+4: AKSJONSPUNKTER OG BESLUTNINGER (GJENSIDIG UTELUKKENDE)
 
-OPPGAVE 4: BESLUTNINGER
-Se igjennom recent_transcript og identifiser beslutninger som ble tatt – ting gruppen ble enige om, vedtok eller konkluderte med.
-- Inkluder BÅDE eksplisitte beslutninger ("vi beslutter at...", "ok, da gjør vi slik") OG implisitte (enighet som kom frem gjennom diskusjonen).
-- Skriv beslutningen som en konstatering: "Grupperom A velges fremfor alternativ B", "Prosjektleder får ansvar for..."
+VIKTIG: Hvert utsagn fra transkriptet skal kun havne ÉN plass — enten som aksjonspunkt ELLER som beslutning, aldri begge. Du må ta en aktiv vurdering.
+
+Klassifiseringsregel:
+- BESLUTNING = noe gruppen ble enige om eller har konkludert (ingenting gjenstår å gjøre for at "saken er bestemt"). Eksempler: "Vi velger leverandør A", "Møtet flyttes til onsdag", "Prosjektleder får ansvar for X".
+- AKSJONSPUNKT = noe konkret som SKAL UTFØRES av noen i fremtiden. Eksempler: "Hente inn priser", "Sende rapport til kunde", "Avklare med juridisk".
+- Hvis et utsagn både inneholder en beslutning OG en handling som følger av den (f.eks. "Vi bestemmer at Per sender rapporten innen fredag"), del det opp: lag ÉN beslutning ("Per får ansvaret for rapporten") OG ÉN aksjon ("Sende rapport innen fredag, ansvarlig: Per"). Da er innholdet komplementært, ikke duplisert.
+- Hvis du er i tvil mellom beslutning og aksjon: spør om setningen er en KONSTATERING (beslutning) eller en INSTRUKSJON/OPPGAVE (aksjon). Brukeren kan flytte mellom kategoriene etterpå hvis du tar feil.
+
+AKSJONSPUNKTER:
+- Inkluder BÅDE eksplisitte oppgaver ("vi må...") OG implisitte (åpne spørsmål som ikke ble besvart, ting som trengte mer avklaring, tall som må finnes).
+- Beskriv som konkret oppgave med verb: "Hente inn...", "Avklare...", "Undersøke...", "Bekrefte...", "Planlegge besøk til...", etc.
+- Forsøk å finne hvem som er ansvarlig (person/rolle nevnt i transkript) og eventuelle frister.
+- DEDUPLICERING: Hvis et nytt aksjonspunkt handler om det SAMME som et eksisterende (se EKSISTERENDE AKSJONSPUNKTER over), GJENBRUK den eksisterende IDen og oppdater tekst/ansvarlig/frist. IKKE lag et nytt aksjonspunkt for det samme temaet.
+- Sjekk også EKSISTERENDE BESLUTNINGER — hvis det du vurderer som aksjon allerede står som beslutning der, må du IKKE foreslå det som aksjon i tillegg. La det stå som beslutning (brukeren flytter selv hvis de mener det er feil).
+- Returner opptil 6 aksjonspunkter.
+
+BESLUTNINGER:
+- Inkluder BÅDE eksplisitte ("vi beslutter at...", "ok, da gjør vi slik") OG implisitte (enighet som kom frem gjennom diskusjonen).
+- Skriv som konstatering: "Grupperom A velges fremfor alternativ B", "Prosjektleder får ansvar for..."
 - Legg ved et kort sitat/kontekst fra transkriptet som viser at beslutningen ble tatt.
-- DEDUPLICERING: Hvis en ny beslutning handler om det SAMME som en eksisterende (se EKSISTERENDE BESLUTNINGER over), GJENBRUK den eksisterende IDen og oppdater tekst/kontekst med mer presis informasjon. IKKE lag en ny beslutning for det samme vedtaket.
-- Returner opptil 4 beslutninger per kall.
-- Returner tom liste hvis ingen beslutninger ble tatt.
+- DEDUPLICERING: Hvis en ny beslutning handler om det SAMME som en eksisterende (se EKSISTERENDE BESLUTNINGER over), GJENBRUK den eksisterende IDen og oppdater tekst/kontekst.
+- Sjekk også EKSISTERENDE AKSJONSPUNKTER — hvis det du vurderer som beslutning allerede står som aksjon der, må du IKKE foreslå det som beslutning i tillegg.
+- Returner opptil 4 beslutninger.
 
 Returner ALLTID gyldig JSON i dette formatet:
 {
