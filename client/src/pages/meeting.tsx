@@ -827,13 +827,16 @@ export default function MeetingPage() {
           for (const a of incomingActions) {
             const id = a.id || `action-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
             if (existingMap.has(id)) {
-              // Update existing — preserve status/owner/deadline if already approved
               const existing = existingMap.get(id)!;
+              // Lock approved/rejected items — AI can refine "proposed" text as more
+              // context arrives in later transcript minutes, but once the user has
+              // acted on an item it must not change underneath them.
+              if (existing.status !== "proposed") continue;
               const idx = result.findIndex(x => x.id === id);
               if (idx !== -1) {
                 result[idx] = {
                   ...existing,
-                  text: a.text, // always use the more detailed/updated text
+                  text: a.text,
                   suggestedOwner: a.suggestedOwner ?? existing.suggestedOwner,
                   suggestedDeadline: a.suggestedDeadline ?? existing.suggestedDeadline,
                 };
@@ -878,8 +881,9 @@ export default function MeetingPage() {
           for (const d of incomingDecisions) {
             const id = d.id || `decision-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
             if (existingMap.has(id)) {
-              // Update existing — preserve status
               const existing = existingMap.get(id)!;
+              // Same locking as actions — only refine while still "proposed".
+              if (existing.status !== "proposed") continue;
               const idx = result.findIndex(x => x.id === id);
               if (idx !== -1) {
                 result[idx] = {

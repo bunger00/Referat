@@ -1057,6 +1057,14 @@ VIKTIGE REGLER FOR ADVARSLER:
 
 OPPGAVE 3+4: AKSJONSPUNKTER OG BESLUTNINGER (GJENSIDIG UTELUKKENDE)
 
+REVIEW-PASS FØRST (viktigste skritt): Før du leter etter nye items, gå gjennom EKSISTERENDE AKSJONSPUNKTER og EKSISTERENDE BESLUTNINGER. For hver av dem som har status "proposed":
+- Sjekk om FULL TRANSKRIPT (hele møtet, ikke bare siste minutter) har gitt mer kontekst som gjør formuleringen klarere, mer presis eller mer komplett.
+- Hvis ja: returner den med SAMME ID og oppdatert tekst/ansvarlig/frist/kontekst. Eksempel: et tidligere uklart forslag "Avklare gummistøvel-praksis" kan nå bli "Alle ansatte skal bruke gummistøvler i uke 22" hvis transkriptet senere bekrefter at det ER en beslutning.
+- Hvis det blir tydelig at en item er feilklassifisert (aksjon som egentlig er beslutning eller omvendt): la det stå — brukeren har "Til beslutning"/"Til aksjon"-knapper og styrer det selv.
+- IKKE rør items med status "approved", "confirmed" eller "rejected" — brukeren har bestemt seg, de er låst.
+
+ETTER review-passen: let etter NYE items i recent_transcript som ikke allerede er fanget.
+
 LES TRANSKRIPTET SOM SAMMENHENGENDE TEKST. Hvert "Taler X"-segment er ofte kuttet midt i en setning fordi lyden chunkes hvert 28. sekund — to påfølgende segmenter med kort tidsavstand er som regel én ytring. Eksempel: "Vi har i ledergruppen besluttet." + "At i uke 22 skal alle gå med gummistøvler på jobben." = én komplett beslutning. Ikke behandle dem som adskilte løsrevne setninger.
 
 KLASSIFISERINGSREGEL — hvert utsagn havner kun ÉN plass:
