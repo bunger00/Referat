@@ -342,6 +342,13 @@ export default function MeetingPage() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioDataRef = useRef<Uint8Array | null>(null);
   const levelAnimFrameRef = useRef<number | null>(null);
+  // Continuous PCM capture buffers — replaces MediaRecorder stop/start chunking
+  // which left ~100-300ms gaps every 28s and produced WebM fragments that
+  // nb-whisper couldn't reliably transcribe.
+  const pcmBufferRef = useRef<Float32Array[]>([]);
+  const pcmSampleRateRef = useRef<number>(48000);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const [audioLevelBars, setAudioLevelBars] = useState<number[]>(Array(20).fill(0));
 
   const savedQuestions = questions.filter(q => q.status === "saved");
@@ -592,6 +599,56 @@ export default function MeetingPage() {
       cleanupDesktop?.();
     };
   }, [handleScrollEvent]);
+
+  // Encode raw mono Float32 PCM samples to a 16-bit WAV blob.
+  // Whisper accepts wav/flac/mp3 directly, so this is the cleanest format.
+  const encodeWav = (samples: Float32Array, sampleRate: number): Blob => {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const writeStr = (offset: number, s: string) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+    };
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);          // PCM chunk size
+    view.setUint16(20, 1, true);           // PCM format
+    view.setUint16(22, 1, true);           // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); // byte rate
+    view.setUint16(32, 2, true);           // block align
+    view.setUint16(34, 16, true);          // bits per sample
+    writeStr(36, "data");
+    view.setUint32(40, samples.length * 2, true);
+    let off = 44;
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      off += 2;
+    }
+    return new Blob([buffer], { type: "audio/wav" });
+  };
+
+  // Concatenate buffered PCM frames and reset the buffer. Returns null if
+  // there's nothing meaningful to send (less than ~0.5s of audio).
+  const flushPcmBuffer = (): Blob | null => {
+    const frames = pcmBufferRef.current;
+    if (frames.length === 0) return null;
+    pcmBufferRef.current = [];
+
+    let total = 0;
+    for (const f of frames) total += f.length;
+    if (total < pcmSampleRateRef.current * 0.5) return null; // <0.5s of audio, skip
+
+    const merged = new Float32Array(total);
+    let pos = 0;
+    for (const f of frames) {
+      merged.set(f, pos);
+      pos += f.length;
+    }
+    return encodeWav(merged, pcmSampleRateRef.current);
+  };
 
   const sendAudioChunk = useCallback(async (audioBlob: Blob) => {
     try {
@@ -1157,13 +1214,22 @@ export default function MeetingPage() {
       
       streamRef.current = stream;
 
-      // Set up audio level analyser for visual feedback
+      // Single AudioContext drives both the visualizer and the PCM capture pipeline.
+      // Continuous capture via a ScriptProcessor avoids the ~100-300ms gaps that
+      // MediaRecorder.stop()/start() left every 28s, plus produces clean WAV that
+      // nb-whisper transcribes more reliably than mid-stream WebM fragments.
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+      pcmSampleRateRef.current = audioCtx.sampleRate;
+      pcmBufferRef.current = [];
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      audioSourceRef.current = source;
+
+      // Visualizer branch
       try {
-        const audioCtx = new AudioContext();
-        audioContextRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(stream);
         const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64; // gives 32 frequency bins
+        analyser.fftSize = 64;
         analyser.smoothingTimeConstant = 0.7;
         source.connect(analyser);
         analyserRef.current = analyser;
@@ -1174,16 +1240,12 @@ export default function MeetingPage() {
           if (!analyserRef.current || !audioDataRef.current) return;
           analyserRef.current.getByteFrequencyData(audioDataRef.current);
           const data = audioDataRef.current;
-          // Map frequency bins (mostly 0–10 are voice range) to NUM_BARS visual bars
           const bars: number[] = [];
           const binCount = data.length;
           for (let i = 0; i < NUM_BARS; i++) {
-            // Mirror: bars go up then back down for a symmetric look
             const mirroredIdx = i < NUM_BARS / 2 ? i : NUM_BARS - 1 - i;
-            // Sample from lower frequency bins (voice range)
             const binIdx = Math.floor((mirroredIdx / (NUM_BARS / 2)) * Math.min(binCount - 1, 14));
             const raw = data[binIdx] / 255;
-            // Add a little random shimmer so idle mic looks alive
             bars.push(Math.max(raw, 0.03 + Math.random() * 0.06));
           }
           setAudioLevelBars(bars);
@@ -1191,84 +1253,38 @@ export default function MeetingPage() {
         };
         levelAnimFrameRef.current = requestAnimationFrame(animate);
       } catch {
-        // Audio analysis not critical — ignore errors
+        // Visualizer not critical
       }
 
-      // Detect supported MIME type - iOS Safari only supports audio/mp4
-      let mimeType = "audio/mp4"; // Default for iOS Safari
-      if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-        mimeType = "audio/webm;codecs=opus";
-      } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-        mimeType = "audio/webm";
-      } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-        mimeType = "audio/mp4";
-      }
-      
-      // Store mimeType in a ref to avoid closure issues
-      const currentMimeType = mimeType;
-      console.log("Using MIME type:", currentMimeType);
-      
-      // Function to create and start a new recorder session
-      const startNewRecorderSession = () => {
-        if (!streamRef.current) return;
-        
-        try {
-          const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: currentMimeType });
-          mediaRecorderRef.current = mediaRecorder;
-          audioChunksRef.current = [];
-          
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              audioChunksRef.current.push(event.data);
-            }
-          };
-          
-          mediaRecorder.onstop = () => {
-            // When recorder stops, send the complete audio blob
-            if (audioChunksRef.current.length > 0) {
-              const audioBlob = new Blob(audioChunksRef.current, { type: currentMimeType });
-              audioChunksRef.current = [];
-              sendAudioChunk(audioBlob);
-            }
-          };
-          
-          mediaRecorder.onerror = (event) => {
-            console.error("MediaRecorder error:", event);
-            // Try to restart the recorder on error
-            try { startNewRecorderSession(); } catch (e) { console.error("Recovery failed:", e); }
-          };
-          
-          // Start recording without timeslice - collect all data until stop
-          mediaRecorder.start();
-        } catch (recorderError) {
-          console.error("Failed to create MediaRecorder:", recorderError);
-          throw recorderError;
-        }
+      // PCM capture branch — copies each onaudioprocess buffer into a list of
+      // Float32Arrays. flushPcmBuffer() merges and encodes them as WAV.
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      audioProcessorRef.current = processor;
+      processor.onaudioprocess = (e) => {
+        const ch = e.inputBuffer.getChannelData(0);
+        pcmBufferRef.current.push(new Float32Array(ch)); // copy — getChannelData returns a view
       };
-      
-      // Start the first recording session
-      startNewRecorderSession();
+      source.connect(processor);
+      // ScriptProcessor only fires onaudioprocess if it's connected to the destination.
+      processor.connect(audioCtx.destination);
+
+      console.log(`Lydopptak: ${audioCtx.sampleRate}Hz mono PCM → WAV`);
+
       setIsStartingRecording(false);
       setIsRecording(true);
-      setTranscriptionEngine(transcriptionModel === "openai" ? "openai-whisper" : `nb-whisper-${transcriptionModel}`); // updated after first response
+      setTranscriptionEngine(transcriptionModel === "openai" ? "openai-whisper" : `nb-whisper-${transcriptionModel}`);
       setStartTime(new Date().toISOString());
       lastAnalyzedMinuteRef.current = 0;
-      
-      // Set up interval to stop current recorder and start new one every 28 seconds.
-      // NbAiLab recommends chunk_length_s=28 (not 30) to avoid repetition artifacts
-      // at the exact 30-second training boundary of the Whisper model.
+
+      // Every 28s, flush the buffered PCM as a WAV chunk and send for transcription.
+      // No gap — ScriptProcessor keeps capturing while we slice the buffer.
+      // 28s (not 30) avoids repetition artifacts at the Whisper training boundary.
       recordingIntervalRef.current = window.setInterval(() => {
         try {
-          if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-            mediaRecorderRef.current.stop(); // This triggers onstop which sends the audio
-            startNewRecorderSession(); // Start a new complete recording session
-          } else if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
-            // Recorder silently died — restart it
-            console.warn("MediaRecorder was inactive, restarting...");
-            startNewRecorderSession();
-          }
+          const wavBlob = flushPcmBuffer();
+          if (wavBlob) sendAudioChunk(wavBlob);
         } catch (intervalError) {
-          console.error("Recording interval error:", intervalError);
+          console.error("Audio chunk error:", intervalError);
         }
       }, 28000);
       
@@ -1312,31 +1328,51 @@ export default function MeetingPage() {
   };
 
   const stopRecording = () => {
-    // Clear the recording interval first
+    // Clear the recording interval first so no new chunks are scheduled
     if (recordingIntervalRef.current) {
       clearInterval(recordingIntervalRef.current);
       recordingIntervalRef.current = null;
     }
-    
+
     // Clear rule check interval
     if (ruleCheckIntervalRef.current) {
       clearInterval(ruleCheckIntervalRef.current);
       ruleCheckIntervalRef.current = null;
     }
-    
-    // Stop the current recorder - this triggers onstop which sends remaining audio
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.stop();
+
+    // Flush any in-progress audio BEFORE tearing down the pipeline so the tail
+    // of the meeting (whatever has been said since the last 28s tick) gets
+    // transcribed too. Disconnecting the processor first stops new frames from
+    // arriving so the buffer is stable when we read it.
+    if (audioProcessorRef.current) {
+      try { audioProcessorRef.current.disconnect(); } catch { /* already disconnected */ }
+      audioProcessorRef.current.onaudioprocess = null;
+      audioProcessorRef.current = null;
     }
-    
-    mediaRecorderRef.current = null;
-    
+    if (audioSourceRef.current) {
+      try { audioSourceRef.current.disconnect(); } catch { /* already disconnected */ }
+      audioSourceRef.current = null;
+    }
+
+    const tailBlob = flushPcmBuffer();
+    if (tailBlob) {
+      console.log(`Sender siste lydklipp (${(tailBlob.size / 1024).toFixed(1)} KB)`);
+      sendAudioChunk(tailBlob);
+    }
+
+    // Legacy MediaRecorder fallback in case anything still holds a reference
+    if (mediaRecorderRef.current) {
+      try {
+        if (mediaRecorderRef.current.state === "recording") mediaRecorderRef.current.stop();
+      } catch { /* ignore */ }
+      mediaRecorderRef.current = null;
+    }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
 
-    // Stop audio level analyser
     if (levelAnimFrameRef.current) {
       cancelAnimationFrame(levelAnimFrameRef.current);
       levelAnimFrameRef.current = null;

@@ -181,8 +181,16 @@ async function transcribeWithNbWhisperRaw(audioBuffer: Buffer, model: "medium" |
   return result as HfTranscriptionResult;
 }
 
-async function transcribeWithOpenAI(audioBuffer: Buffer): Promise<HfTranscriptionResult> {
-  const file = await toFile(audioBuffer, "audio.webm", { type: "audio/webm" });
+async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "audio/webm"): Promise<HfTranscriptionResult> {
+  // Whisper detects format from the file's magic bytes regardless of the
+  // filename, but matching the extension to the actual mime keeps logs sane
+  // and avoids edge-case rejections.
+  const ext =
+    mimeType.includes("wav") ? "wav" :
+    mimeType.includes("mp4") ? "mp4" :
+    mimeType.includes("mp3") || mimeType.includes("mpeg") ? "mp3" :
+    "webm";
+  const file = await toFile(audioBuffer, `audio.${ext}`, { type: mimeType });
   const result = await openai.audio.transcriptions.create({
     file,
     model: "whisper-1",
@@ -250,12 +258,12 @@ function hasTranscriptionContent(result: HfTranscriptionResult): boolean {
   return hasText || hasChunks;
 }
 
-async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium"): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
+async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium", mimeType?: string): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
   // OpenAI is only used when the user explicitly picks it. nb-whisper-* will
   // never silently fall back — failures bubble up so the UI can show what's
   // wrong (e.g. paused endpoint).
   if (model === "openai") {
-    const result = await transcribeWithOpenAI(audioBuffer);
+    const result = await transcribeWithOpenAI(audioBuffer, mimeType);
     return { ...result, engine: "openai-whisper" };
   }
 
@@ -558,22 +566,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Ugyldig forespørsel", details: parsed.error.issues });
       }
       
-      const { audio, model } = parsed.data;
-      
+      const { audio, model, mimeType } = parsed.data;
+
       if (!audio || audio.length === 0) {
         return res.json({ segments: [] });
       }
-      
+
       // Convert base64 to buffer
       const audioBuffer = Buffer.from(audio, "base64");
-      
+
       // Check if buffer has actual content
       if (audioBuffer.length < 1000) {
         return res.json({ segments: [] });
       }
-      
+
       // Transcribe with selected model (default: medium)
-      const transcription = await transcribeAudio(audioBuffer, model ?? "medium");
+      const transcription = await transcribeAudio(audioBuffer, model ?? "medium", mimeType);
       
       // Process the transcription into segments with speaker labels
       const segments = [];
