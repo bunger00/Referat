@@ -17,7 +17,9 @@ services:
     plan: free            # Free-tier sover etter 15 min inaktivitet — bytt til "starter" for prod
     region: frankfurt
     branch: main
-    buildCommand: npm install && npm run db:push && npm run build
+    # --include=dev needed because Render sets NODE_ENV=production globally,
+    # which would otherwise skip devDependencies (drizzle-kit, tsx, vite, esbuild).
+    buildCommand: npm install --include=dev && npm run db:push && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
