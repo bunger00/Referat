@@ -650,59 +650,67 @@ export default function MeetingPage() {
     return encodeWav(merged, pcmSampleRateRef.current);
   };
 
-  const sendAudioChunk = useCallback(async (audioBlob: Blob) => {
-    try {
-      setIsProcessing(true);
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        const base64Audio = (reader.result as string).split(",")[1];
-        const mimeType = audioBlob.type;
+  // Returns a promise that resolves after the transcribe response has been
+  // applied to state. stopRecording awaits this so the final analysis sees
+  // the tail audio's transcript too.
+  const sendAudioChunk = useCallback((audioBlob: Blob): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      try {
+        setIsProcessing(true);
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = (reader.result as string).split(",")[1];
+          const mimeType = audioBlob.type;
 
-        try {
-          const res = await fetch("/api/transcribe", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ audio: base64Audio, mimeType, model: transcriptionModel }),
-          });
+          try {
+            const res = await fetch("/api/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ audio: base64Audio, mimeType, model: transcriptionModel }),
+            });
 
-          if (!res.ok) {
-            // Try to read structured error body so we can show actionable info.
-            let body: any = null;
-            try { body = await res.json(); } catch { /* not JSON */ }
-
-            if (body?.code === "ENDPOINT_PAUSED") {
-              const modelName = body.model ? `nb-whisper-${body.model}` : "nb-whisper";
-              toast({
-                title: `${modelName} er pauset`,
-                description: "Start endepunktet på endpoints.huggingface.co — eller velg OpenAI Whisper i Verktøy-menyen.",
-                variant: "destructive",
-                duration: 15000,
-              });
-            } else {
-              console.error("Transkripsjonsfeil:", res.status, body);
+            if (!res.ok) {
+              let body: any = null;
+              try { body = await res.json(); } catch { /* not JSON */ }
+              if (body?.code === "ENDPOINT_PAUSED") {
+                const modelName = body.model ? `nb-whisper-${body.model}` : "nb-whisper";
+                toast({
+                  title: `${modelName} er pauset`,
+                  description: "Start endepunktet på endpoints.huggingface.co — eller velg OpenAI Whisper i Verktøy-menyen.",
+                  variant: "destructive",
+                  duration: 15000,
+                });
+              } else {
+                console.error("Transkripsjonsfeil:", res.status, body);
+              }
+              return;
             }
-            return;
-          }
 
-          const data = (await res.json()) as { segments: TranscriptSegment[]; engine?: string; status?: string };
-
-          if (data.engine) setTranscriptionEngine(data.engine);
-          if (data.segments && data.segments.length > 0) {
-            const corrected = data.segments.map(s => ({ ...s, text: applyWordCorrections(s.text, wordCorrectionsList) }));
-            setTranscript(prev => [...prev, ...corrected]);
+            const data = (await res.json()) as { segments: TranscriptSegment[]; engine?: string; status?: string };
+            if (data.engine) setTranscriptionEngine(data.engine);
+            if (data.segments && data.segments.length > 0) {
+              const corrected = data.segments.map(s => ({ ...s, text: applyWordCorrections(s.text, wordCorrectionsList) }));
+              setTranscript(prev => [...prev, ...corrected]);
+            }
+          } catch (error) {
+            console.error("Transkripsjonsfeil:", error);
+          } finally {
+            setIsProcessing(false);
+            resolve();
           }
-        } catch (error) {
-          console.error("Transkripsjonsfeil:", error);
-        } finally {
+        };
+        reader.onerror = () => {
           setIsProcessing(false);
-        }
-      };
-    } catch (error) {
-      console.error("Feil ved sending av lyd:", error);
-      setIsProcessing(false);
-    }
+          resolve();
+        };
+      } catch (error) {
+        console.error("Feil ved sending av lyd:", error);
+        setIsProcessing(false);
+        resolve();
+      }
+    });
   }, []);
 
   const generateQuestions = useCallback(async (minutesBack: number, isManual: boolean = false) => {
@@ -956,13 +964,17 @@ export default function MeetingPage() {
     }
     
     lastAnalyzedMinuteRef.current = currentMinute;
-    
-    // Use the selected interval for how much "recent" transcript to include
-    await generateQuestions(questionInterval, false);
+
+    // questionInterval controls *how often* AI runs, but the AI always needs
+    // a wider context window to catch slow-developing decisions/threads.
+    // 10 minutes back gives it enough rope to connect "vi har besluttet..."
+    // (minute N) with the actual content (minute N+1) and to refine earlier
+    // proposed items.
+    await generateQuestions(10, false);
   }, [elapsedSeconds, transcript, questionInterval, generateQuestions]);
 
   const handleManualGenerate = useCallback(() => {
-    generateQuestions(5, true);
+    generateQuestions(10, true);
   }, [generateQuestions]);
 
   // Action item handlers
@@ -1371,7 +1383,7 @@ export default function MeetingPage() {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     // Clear the recording interval first so no new chunks are scheduled
     if (recordingIntervalRef.current) {
       clearInterval(recordingIntervalRef.current);
@@ -1399,10 +1411,27 @@ export default function MeetingPage() {
     }
 
     const tailBlob = flushPcmBuffer();
+    let tailPromise: Promise<void> | null = null;
     if (tailBlob) {
       console.log(`Sender siste lydklipp (${(tailBlob.size / 1024).toFixed(1)} KB)`);
-      sendAudioChunk(tailBlob);
+      tailPromise = sendAudioChunk(tailBlob);
     }
+
+    // Schedule a FINAL ANALYSIS pass once the tail has been transcribed. We
+    // don't block stopRecording on it — the user gets immediate UI feedback
+    // ("Opptak stoppet"), and the final AI pass runs in the background and
+    // populates any last-minute decisions/actions/refinements once it's done.
+    (async () => {
+      try {
+        if (tailPromise) await tailPromise;
+        // Pass 999 = "include the entire meeting" so the AI can do its
+        // review-pass over every proposed item with full context.
+        await generateQuestions(999, false);
+        toast({ title: "Sluttanalyse fullført", description: "AI har gjennomgått hele møtet." });
+      } catch (e) {
+        console.error("Final analyze failed:", e);
+      }
+    })();
 
     // Legacy MediaRecorder fallback in case anything still holds a reference
     if (mediaRecorderRef.current) {
