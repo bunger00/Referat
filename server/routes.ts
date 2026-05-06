@@ -119,6 +119,11 @@ async function transcribeWithNbWhisper(audioBuffer: Buffer, model: "medium" | "l
 
   if (!response.ok) {
     const errorText = await response.text();
+    // Paused endpoints return HTTP 400 with a specific body — distinct from
+    // "JSON format rejected" 400s, which is what triggers the raw-binary retry.
+    if (errorText.includes("is paused") || errorText.includes("paused, ask a maintainer")) {
+      throw new Error("ENDPOINT_PAUSED");
+    }
     // Fallback: retry as raw binary if JSON format is rejected by the endpoint
     if (response.status === 400 || response.status === 422) {
       console.log(`nb-whisper-${model}: JSON format avvist (${response.status}), prøver rå binær...`);
@@ -164,6 +169,9 @@ async function transcribeWithNbWhisperRaw(audioBuffer: Buffer, model: "medium" |
   if (response.status === 503) throw new Error("ENDPOINT_LOADING");
   if (!response.ok) {
     const errorText = await response.text();
+    if (errorText.includes("is paused") || errorText.includes("paused, ask a maintainer")) {
+      throw new Error("ENDPOINT_PAUSED");
+    }
     throw new Error(`HuggingFace endpoint-feil (raw): ${response.status} – ${errorText}`);
   }
   const result = await response.json();
@@ -189,16 +197,9 @@ async function transcribeWithOpenAI(audioBuffer: Buffer): Promise<HfTranscriptio
   return { text: result.text, chunks: chunks.length > 0 ? chunks : undefined };
 }
 
-// Track consecutive empty results and errors per model to detect degraded state
-const consecutiveEmpties: Record<string, number> = { medium: 0, large: 0 };
-const consecutiveErrors: Record<string, number> = { medium: 0, large: 0 };
+// Track endpoint state per model so we can surface useful status to the UI.
+// We do NOT auto-fall back to OpenAI when the user picked a Norwegian model.
 const consecutiveLoading: Record<string, number> = { medium: 0, large: 0 };
-// Require 8 consecutive empty chunks (~4 min) before falling back to OpenAI
-const NB_WHISPER_EMPTY_FALLBACK_THRESHOLD = 8;
-// Require 6 consecutive hard errors before falling back to OpenAI
-const NB_WHISPER_ERROR_FALLBACK_THRESHOLD = 6;
-// After 3 consecutive 503/loading responses the endpoint is likely stopped — fall back
-const NB_WHISPER_LOADING_FALLBACK_THRESHOLD = 3;
 
 // Keep HuggingFace endpoints warm by pinging every 5 minutes
 const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
@@ -219,12 +220,23 @@ async function pingNbWhisperEndpoints() {
       });
       clearTimeout(tid);
       const status = res.status;
-      if (status === 200 || status === 400 || status === 422) {
-        // 400/422 = running but rejected empty payload — that's fine, it's awake
+      // 400 may mean "rejected empty payload" (awake) OR "endpoint is paused" (stopped) —
+      // peek at the body to tell them apart.
+      if (status === 400) {
+        const body = await res.text();
+        if (body.includes("is paused") || body.includes("paused, ask a maintainer")) {
+          console.warn(`Keep-alive nb-whisper-${model}: ENDEPUNKT PAUSET — start det på https://endpoints.huggingface.co/`);
+          continue;
+        }
+        consecutiveLoading[model] = 0;
+        console.log(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (400 = empty body avvist)`);
+      } else if (status === 200 || status === 422) {
         consecutiveLoading[model] = 0;
         console.log(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (${status})`);
       } else if (status === 503) {
         console.log(`Keep-alive nb-whisper-${model}: starter opp (503)...`);
+      } else {
+        console.log(`Keep-alive nb-whisper-${model}: uventet status ${status}`);
       }
     } catch {
       // Ignore keep-alive errors
@@ -238,94 +250,45 @@ function hasTranscriptionContent(result: HfTranscriptionResult): boolean {
   return hasText || hasChunks;
 }
 
-async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium"): Promise<HfTranscriptionResult & { engine?: string }> {
-  // If user explicitly wants OpenAI, skip nb-whisper entirely
+async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium"): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
+  // OpenAI is only used when the user explicitly picks it. nb-whisper-* will
+  // never silently fall back — failures bubble up so the UI can show what's
+  // wrong (e.g. paused endpoint).
   if (model === "openai") {
     const result = await transcribeWithOpenAI(audioBuffer);
     return { ...result, engine: "openai-whisper" };
   }
 
-  // If HF endpoints are not configured, go straight to OpenAI Whisper.
   if (!hasNbWhisperConfigured(model)) {
-    const result = await transcribeWithOpenAI(audioBuffer);
-    return { ...result, engine: "openai-whisper" };
+    throw new Error(`nb-whisper-${model} er ikke konfigurert (HF_NB_WHISPER_${model.toUpperCase()}_URL mangler)`);
   }
-
-  const empties = consecutiveEmpties[model] ?? 0;
-  const errors = consecutiveErrors[model] ?? 0;
-  const useOpenAIDirectly =
-    empties >= NB_WHISPER_EMPTY_FALLBACK_THRESHOLD ||
-    errors >= NB_WHISPER_ERROR_FALLBACK_THRESHOLD;
-
-  if (useOpenAIDirectly) {
-    console.log(`nb-whisper-${model}: ${empties} tomme / ${errors} feil på rad — bruker OpenAI Whisper som reserve`);
-    const oaiResult = await transcribeWithOpenAI(audioBuffer);
-    if (hasTranscriptionContent(oaiResult)) {
-      // Keep near threshold so nb-whisper is retried again after a few successful OpenAI results
-      consecutiveEmpties[model] = Math.max(0, NB_WHISPER_EMPTY_FALLBACK_THRESHOLD - 2);
-      consecutiveErrors[model] = Math.max(0, NB_WHISPER_ERROR_FALLBACK_THRESHOLD - 2);
-    } else {
-      consecutiveEmpties[model] = 0;
-      consecutiveErrors[model] = 0;
-    }
-    return { ...oaiResult, engine: "openai-whisper" };
-  }
-
-  // Heuristic: if buffer > 15 KB it likely contains real speech (not just silence/noise)
-  const likelySpeech = audioBuffer.length > 15000;
 
   try {
     const result = await transcribeWithNbWhisper(audioBuffer, model);
+    consecutiveLoading[model] = 0;
     if (hasTranscriptionContent(result)) {
-      consecutiveEmpties[model] = 0;
-      consecutiveErrors[model] = 0;
-      consecutiveLoading[model] = 0;
       console.log(`Transkribert med nb-whisper-${model}`);
-      return { ...result, engine: `nb-whisper-${model}` };
     }
-
-    // nb-whisper returned empty — if audio is likely speech, retry immediately with OpenAI
-    consecutiveEmpties[model] = empties + 1;
-    if (likelySpeech) {
-      console.log(`nb-whisper-${model} returnerte tomt men lyd er trolig tale (${audioBuffer.length} bytes) — bruker OpenAI Whisper`);
-      const oaiResult = await transcribeWithOpenAI(audioBuffer);
-      if (hasTranscriptionContent(oaiResult)) {
-        consecutiveEmpties[model] = 0; // reset — nb-whisper missed it, OpenAI got it
-      }
-      return { ...oaiResult, engine: "openai-whisper" };
-    }
-
-    console.log(`nb-whisper-${model} returnerte tomt — lyden ser ut til å være stille (${audioBuffer.length} bytes, ${consecutiveEmpties[model]}/${NB_WHISPER_EMPTY_FALLBACK_THRESHOLD})`);
-    return { text: "", engine: `nb-whisper-${model}` };
+    return { ...result, engine: `nb-whisper-${model}` };
   } catch (err: any) {
-    const isLoading = err.message === "ENDPOINT_LOADING" || err.message?.includes("loading");
-    const isSlow = err.message?.includes("for lang tid");
-
-    if (isLoading) {
+    if (err.message === "ENDPOINT_PAUSED") {
+      // Surface as a structured error — the client shows actionable text.
+      const e = new Error(`nb-whisper-${model} er pauset. Start endepunktet på https://endpoints.huggingface.co/`);
+      (e as any).code = "ENDPOINT_PAUSED";
+      (e as any).model = model;
+      throw e;
+    }
+    if (err.message === "ENDPOINT_LOADING") {
       consecutiveLoading[model] = (consecutiveLoading[model] ?? 0) + 1;
-      console.log(`nb-whisper-${model} endpoint laster opp (${consecutiveLoading[model]}/${NB_WHISPER_LOADING_FALLBACK_THRESHOLD}), venter til neste chunk...`);
-      if (consecutiveLoading[model] >= NB_WHISPER_LOADING_FALLBACK_THRESHOLD) {
-        // Endpoint appears stopped — fall back to OpenAI and keep loading counter high so we keep using OpenAI
-        console.log(`nb-whisper-${model} ser ut til å være stoppet — bruker OpenAI Whisper`);
-        const oaiResult = await transcribeWithOpenAI(audioBuffer);
-        return { ...oaiResult, engine: "openai-whisper" };
-      }
-      return { text: "", engine: `nb-whisper-${model}` };
+      console.log(`nb-whisper-${model} laster opp (${consecutiveLoading[model]} chunks ventende) — returnerer tom for denne chunken`);
+      // Don't fall back — return empty so the user keeps recording while the
+      // endpoint warms up. Subsequent chunks will succeed once it's ready.
+      return { text: "", engine: `nb-whisper-${model}`, status: "loading" };
     }
-
-    // Count hard errors (timeout, API error, etc.)
-    consecutiveErrors[model] = errors + 1;
-    console.log(`nb-whisper-${model} feil (${consecutiveErrors[model]}/${NB_WHISPER_ERROR_FALLBACK_THRESHOLD}): ${isSlow ? "timeout" : err.message}`);
-
-    if (consecutiveErrors[model] >= NB_WHISPER_ERROR_FALLBACK_THRESHOLD) {
-      // Hit the error threshold — use OpenAI this time
-      console.log(`nb-whisper-${model} nådde feilgrensen — bruker OpenAI Whisper`);
-      const result = await transcribeWithOpenAI(audioBuffer);
-      return { ...result, engine: "openai-whisper" };
-    }
-
-    // Below threshold — return empty for this chunk and keep trying nb-whisper
-    return { text: "", engine: `nb-whisper-${model}` };
+    // Hard errors (timeout, network, model error) — surface to client with model context.
+    const isSlow = err.message?.includes("for lang tid");
+    console.error(`nb-whisper-${model} feil:`, isSlow ? "timeout" : err.message);
+    throw err;
   }
 }
 
@@ -681,13 +644,25 @@ export async function registerRoutes(
         }
       }
       
-      res.json({ segments, engine: (transcription as any).engine || "openai-whisper" });
-      
+      res.json({
+        segments,
+        engine: (transcription as any).engine || "openai-whisper",
+        status: (transcription as any).status,
+      });
+
     } catch (error: any) {
       console.error("Transkripsjonsfeil:", error);
-      res.status(500).json({ 
-        error: "Kunne ikke transkribere lyd", 
-        details: error.message 
+      // Paused endpoint is actionable — surface a 503 with code so client can show a clear banner.
+      if (error?.code === "ENDPOINT_PAUSED") {
+        return res.status(503).json({
+          error: error.message,
+          code: "ENDPOINT_PAUSED",
+          model: error.model,
+        });
+      }
+      res.status(500).json({
+        error: "Kunne ikke transkribere lyd",
+        details: error.message
       });
     }
   });

@@ -601,18 +601,37 @@ export default function MeetingPage() {
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(",")[1];
         const mimeType = audioBlob.type;
-        
+
         try {
-          const response = await apiRequest("POST", "/api/transcribe", { 
-            audio: base64Audio,
-            mimeType: mimeType,
-            model: transcriptionModel,
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ audio: base64Audio, mimeType, model: transcriptionModel }),
           });
-          const data = await response.json() as { segments: TranscriptSegment[]; engine?: string };
-          
-          if (data.engine) {
-            setTranscriptionEngine(data.engine);
+
+          if (!res.ok) {
+            // Try to read structured error body so we can show actionable info.
+            let body: any = null;
+            try { body = await res.json(); } catch { /* not JSON */ }
+
+            if (body?.code === "ENDPOINT_PAUSED") {
+              const modelName = body.model ? `nb-whisper-${body.model}` : "nb-whisper";
+              toast({
+                title: `${modelName} er pauset`,
+                description: "Start endepunktet på endpoints.huggingface.co — eller velg OpenAI Whisper i Verktøy-menyen.",
+                variant: "destructive",
+                duration: 15000,
+              });
+            } else {
+              console.error("Transkripsjonsfeil:", res.status, body);
+            }
+            return;
           }
+
+          const data = (await res.json()) as { segments: TranscriptSegment[]; engine?: string; status?: string };
+
+          if (data.engine) setTranscriptionEngine(data.engine);
           if (data.segments && data.segments.length > 0) {
             const corrected = data.segments.map(s => ({ ...s, text: applyWordCorrections(s.text, wordCorrectionsList) }));
             setTranscript(prev => [...prev, ...corrected]);
