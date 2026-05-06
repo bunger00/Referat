@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# User uploads (audio, voice profiles, rule documents)
+uploads/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+
+# Logs
+logs/
+*.log
+
+# Migrations folder created by drizzle-kit (generated)
+migrations/meta/
+
+# Replit
+.replit
+.upm/
+.config/
+.cache/
+.breakpoints
+replit.nix
+
+# Temp / coverage
+.tmp/
+.cache/
+coverage/
+
+# Attached assets are Replit-uploaded reference material (~7MB) and not used
+# by the code. Kept locally only. Remove this line if you want them in git.
+attached_assets/

@@ -1,0 +1,56 @@
+# Render Blueprint for the Møtetranskripsjons-app.
+# Etter du har pushet repoet til GitHub:
+#   1. Gå til https://dashboard.render.com/blueprints
+#   2. "New Blueprint Instance" → koble til repoet → Render leser denne fila.
+#   3. Render oppretter Postgres-databasen og web-tjenesten automatisk.
+#   4. Sett de hemmelige variablene som er markert `sync: false` nederst.
+#
+# Render setter `PORT` og `DATABASE_URL` automatisk (sistnevnte fra databasen
+# definert under `databases:`).
+
+databases:
+  - name: referat-db
+    databaseName: referat
+    plan: free            # Bytt til `starter` eller høyere for produksjon (gratis = 90 dager)
+    region: frankfurt     # Nærmeste region for Norge
+
+services:
+  - type: web
+    name: referat
+    runtime: node
+    plan: free            # Free-tier sover etter 15 min inaktivitet — bytt for prod
+    region: frankfurt
+    branch: main
+    buildCommand: npm install && npm run db:push && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # ----- Auto-injisert -----
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: referat-db
+          property: connectionString
+
+      # ----- Auto-generert -----
+      - key: SESSION_SECRET
+        generateValue: true     # Render lager en sterk tilfeldig verdi
+
+      # ----- Du må sette disse manuelt i Render dashboard -----
+      # `sync: false` betyr at Render ikke lagrer verdien i denne fila.
+      - key: APP_PASSWORD_HASH
+        sync: false             # Generer lokalt: `npm run setup`, kopier hashen
+      - key: OPENAI_API_KEY
+        sync: false             # Din OpenAI-nøkkel (sk-...)
+
+      # ----- Valgfritt: HuggingFace nb-whisper -----
+      # Hvis du har dedikerte HuggingFace Inference Endpoints. La være tomme
+      # for å bruke OpenAI Whisper som primær transkripsjon.
+      - key: HUGGINGFACE_API_KEY
+        sync: false
+      - key: HF_NB_WHISPER_MEDIUM_URL
+        sync: false
+      - key: HF_NB_WHISPER_LARGE_URL
+        sync: false
