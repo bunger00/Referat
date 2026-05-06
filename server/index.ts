@@ -38,7 +38,12 @@ if (isProd) {
   sessionStore = new PgSession({
     pool,
     tableName: "user_sessions",
-    createTableIfMissing: true,
+    // We create the table ourselves below — connect-pg-simple's auto-create
+    // reads table.sql relative to __dirname, which breaks when the package is
+    // bundled by esbuild (the SQL file isn't copied into dist/). Falsy here
+    // prevents the lazy fs.readFile call entirely.
+    createTableIfMissing: false,
+    errorLog: (...args) => console.error("[pg-session]", ...args),
   });
 } else {
   const MemoryStore = createMemoryStore(session);
@@ -136,6 +141,24 @@ app.get("/api/health", async (_req, res) => {
 });
 
 (async () => {
+  // Ensure session table exists. We do this ourselves rather than relying on
+  // connect-pg-simple's createTableIfMissing because that feature reads
+  // table.sql via __dirname, which esbuild's bundling breaks.
+  if (isProd) {
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS "user_sessions" (
+          "sid" varchar NOT NULL PRIMARY KEY,
+          "sess" json NOT NULL,
+          "expire" timestamp(6) NOT NULL
+        )
+      `);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_sessions_expire" ON "user_sessions" ("expire")`);
+    } catch (e) {
+      console.error("Failed to ensure user_sessions table:", e);
+    }
+  }
+
   // Ensure optional columns exist (safe to run on every startup — IF NOT EXISTS is idempotent)
   try {
     await db.execute(sql`ALTER TABLE meeting_sessions ADD COLUMN IF NOT EXISTS series_name VARCHAR(255)`);
