@@ -16,16 +16,20 @@ transkripsjon.
 ### Forutsetninger
 
 - **Node.js 20+** (`node -v`)
-- **PostgreSQL 14+** (`psql --version`) — installer via Homebrew:
-  ```bash
-  brew install postgresql@16
-  brew services start postgresql@16
-  ```
 - **ffmpeg** for splitting av store lydfiler (`ffmpeg -version`):
   ```bash
   brew install ffmpeg
   ```
 - En **OpenAI API-nøkkel** ([platform.openai.com](https://platform.openai.com/api-keys))
+- **PostgreSQL** — du har to valg:
+  - **Supabase** (anbefalt, gratis): se [Supabase-oppsett](#supabase-oppsett)
+    under. Da trenger du ikke installere Postgres lokalt.
+  - **Lokal Postgres**:
+    ```bash
+    brew install postgresql@16
+    brew services start postgresql@16
+    createdb referat
+    ```
 
 ### Oppsett (én gang)
 
@@ -35,14 +39,14 @@ git clone https://github.com/bunger00/Referat.git
 cd Referat
 npm install
 
-# 2. Opprett database
-createdb referat
-
-# 3. Lag .env med passord-hash + session-secret
+# 2. Opprett .env og generer passord-hash + session-secret
 cp .env.example .env
-npm run setup        # spør om app-passord, genererer hash + secret
+npm run setup
 
-# 4. Åpne .env og fyll inn OPENAI_API_KEY
+# 3. Sett DATABASE_URL i .env (se Supabase-oppsett under, eller bruk lokal:
+#    postgresql://<dittbrukernavn>@localhost:5432/referat)
+
+# 4. Sett OPENAI_API_KEY i .env
 # (HuggingFace-feltene kan stå tomme — appen bruker OpenAI Whisper som fallback)
 
 # 5. Push DB-skjema
@@ -65,6 +69,51 @@ npm run dev          # start utviklingsserveren med live reload
 npm run check        # TypeScript-typesjekk
 npm run db:push      # synkroniser DB-skjema etter endringer i shared/schema.ts
 ```
+
+---
+
+## Supabase-oppsett
+
+[Supabase](https://supabase.com) gir deg en hosted Postgres på minutter — gratis
+til ~500 MB / 60 connections, helt nok til denne appen.
+
+### Steg-for-steg
+
+1. **Opprett prosjekt** på <https://supabase.com/dashboard> (gratis tier "Nano").
+   Velg en region nær deg — *West EU (Ireland)* er nærmeste for Norge.
+2. **Skriv ned database-passordet** du valgte ved opprettelse. (Glemt det?
+   Reset under *Project Settings → Database → Reset database password*.)
+3. **Hent connection string**:
+   - Klikk den grønne **"Connect"**-knappen øverst
+   - Velg **"Connection string" → "URI"**
+   - Velg **"Connection pooling" / "Session mode"** (port 5432 — best for
+     Express-apper med langlivde connections)
+   - Kopier URI-en — den ser slik ut:
+     ```
+     postgresql://postgres.<dinprosjektref>:[YOUR-PASSWORD]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+     ```
+4. **Erstatt `[YOUR-PASSWORD]`** med database-passordet ditt.
+5. **Lim inn i `.env`** (lokalt) eller i Render dashboard (prod):
+   ```
+   DATABASE_URL=postgresql://postgres.xxxxx:passwordet@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+   ```
+6. **Push skjema**:
+   ```bash
+   npm run db:push
+   ```
+   Dette oppretter alle tabellene (`meeting_sessions`, `meeting_series`,
+   `rule_documents`, osv.) i Supabase-databasen din. Du kan inspisere dem
+   i Supabase under *Table Editor*.
+
+> **Hvorfor Session mode (5432) og ikke Transaction mode (6543)?**
+> Transaction-poolen i Supabase støtter ikke prepared statements. Drizzle
+> bruker prepared statements internt, så Session mode er sikkereste valget
+> for langlivde Express-servere. Hvis du vil bruke Transaction mode (f.eks.
+> for serverless), må du sette `DB_POOL_MAX=1` for å unngå statement-konflikt.
+
+> **SSL?** `db.ts` aktiverer SSL automatisk når URL-en inneholder `supabase`,
+> `amazonaws`, `render.com`, `neon.tech` eller `sslmode=require`. Du trenger
+> ikke gjøre noe.
 
 ---
 
