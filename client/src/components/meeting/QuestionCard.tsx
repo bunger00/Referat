@@ -58,7 +58,7 @@ export function QuestionCard({ question, variant, onSave, onDelete, onEdit, onRe
               variant="ghost"
               onClick={() => onSave(question.id)}
               aria-label="Lagre spørsmål"
-              className="h-7 w-7 text-success hover:bg-success/10"
+              className="h-9 w-9 sm:h-7 sm:w-7 text-success hover:bg-success/10"
             >
               <Check className="h-4 w-4" />
             </Button>
@@ -69,7 +69,7 @@ export function QuestionCard({ question, variant, onSave, onDelete, onEdit, onRe
               variant="ghost"
               onClick={() => onEdit(question)}
               aria-label="Rediger spørsmål"
-              className="h-7 w-7"
+              className="h-9 w-9 sm:h-7 sm:w-7"
             >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -81,7 +81,7 @@ export function QuestionCard({ question, variant, onSave, onDelete, onEdit, onRe
               variant === "saved" ? onRemove?.(question.id) : onDelete?.(question.id)
             }
             aria-label={variant === "saved" ? "Fjern" : "Slett"}
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            className="h-9 w-9 sm:h-7 sm:w-7 text-muted-foreground hover:text-destructive"
           >
             <X className="h-3.5 w-3.5" />
           </Button>

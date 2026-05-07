@@ -3128,7 +3128,7 @@ export default function MeetingPage() {
       />
 
       <Dialog open={!!editingQuestion} onOpenChange={() => setEditingQuestion(null)}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Rediger spørsmål</DialogTitle>
             <DialogDescription>
@@ -3449,7 +3449,7 @@ export default function MeetingPage() {
           }).catch(() => {});
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Tidligere møter</DialogTitle>
             <DialogDescription>
@@ -3725,7 +3725,7 @@ export default function MeetingPage() {
       </Dialog>
       
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Lagre møte</DialogTitle>
             <DialogDescription>
@@ -3798,7 +3798,7 @@ export default function MeetingPage() {
       </Dialog>
       
       <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Endre navn</DialogTitle>
             <DialogDescription>
@@ -3836,7 +3836,7 @@ export default function MeetingPage() {
 
       {/* Meeting Documents Dialog */}
       <Dialog open={showMeetingDocsDialog} onOpenChange={setShowMeetingDocsDialog}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="w-[95vw] max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
@@ -3992,7 +3992,7 @@ export default function MeetingPage() {
 
       {/* Rules Management Dialog */}
       <Dialog open={showRulesDialog} onOpenChange={setShowRulesDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BookOpen className="h-5 w-5" />
@@ -4175,7 +4175,7 @@ export default function MeetingPage() {
 
       {/* Word Corrections Dialog */}
       <Dialog open={showWordCorrectionsDialog} onOpenChange={setShowWordCorrectionsDialog}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Replace className="h-5 w-5" />
@@ -4284,7 +4284,7 @@ export default function MeetingPage() {
 
       {/* Audio File Upload Dialog */}
       <Dialog open={showAudioUploadDialog} onOpenChange={setShowAudioUploadDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileUp className="h-5 w-5" />
@@ -4526,7 +4526,7 @@ export default function MeetingPage() {
 
       {/* Reject reason dialog */}
       <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectReason(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="w-[95vw] max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {rejectTarget?.type === "action" ? "Avvis aksjonspunkt" : "Avvis beslutning"}

@@ -47,14 +47,14 @@ export default function KnowledgePage() {
 
       <Tabs defaultValue="rules" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-flex">
-          <TabsTrigger value="rules" className="gap-2">
-            <ScrollText className="h-4 w-4" /> Regelverk
+          <TabsTrigger value="rules" className="gap-1.5 text-xs sm:text-sm">
+            <ScrollText className="h-4 w-4 shrink-0" /><span>Regelverk</span>
           </TabsTrigger>
-          <TabsTrigger value="words" className="gap-2">
-            <Replace className="h-4 w-4" /> Ordrettelser
+          <TabsTrigger value="words" className="gap-1.5 text-xs sm:text-sm">
+            <Replace className="h-4 w-4 shrink-0" /><span className="sm:hidden">Ord</span><span className="hidden sm:inline">Ordrettelser</span>
           </TabsTrigger>
-          <TabsTrigger value="docs" className="gap-2">
-            <FileText className="h-4 w-4" /> Møtedokumenter
+          <TabsTrigger value="docs" className="gap-1.5 text-xs sm:text-sm">
+            <FileText className="h-4 w-4 shrink-0" /><span className="sm:hidden">Dok</span><span className="hidden sm:inline">Møtedokumenter</span>
           </TabsTrigger>
         </TabsList>
 
@@ -230,7 +230,7 @@ function RulesTab() {
       ) : null}
 
       <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Lim inn regelverkstekst</DialogTitle>
           </DialogHeader>

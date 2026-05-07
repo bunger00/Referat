@@ -308,12 +308,12 @@ function WorkbenchTab({
     <TabsTrigger
       value={value}
       className={cn(
-        "relative gap-2 rounded-none border-b-2 border-transparent bg-transparent px-3.5 py-2.5 text-sm font-medium",
+        "relative gap-1.5 sm:gap-2 rounded-none border-b-2 border-transparent bg-transparent px-2.5 sm:px-3.5 py-2.5 text-xs sm:text-sm font-medium whitespace-nowrap",
         "data-[state=active]:border-foreground data-[state=active]:shadow-none",
         "hover:bg-transparent hover:text-foreground/90 transition-colors"
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-4 w-4 shrink-0" />
       <span>{label}</span>
       {badge && badge > 0 ? (
         <span

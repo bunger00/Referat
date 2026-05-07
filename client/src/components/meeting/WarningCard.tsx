@@ -80,7 +80,7 @@ export function WarningCard({ warning, onDismiss }: Props) {
           size="icon"
           onClick={() => onDismiss(warning.id)}
           aria-label="Skjul advarsel"
-          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+          className="h-9 w-9 sm:h-7 sm:w-7 shrink-0 text-muted-foreground hover:text-destructive"
         >
           <X className="h-3.5 w-3.5" />
         </Button>
