@@ -31,7 +31,7 @@ type LocalPrefs = {
 const DEFAULT_PREFS: LocalPrefs = {
   expertRole: "bygg",
   questionInterval: 1,
-  transcriptionModel: "medium",
+  transcriptionModel: "openai",
 };
 
 function loadPrefs(): LocalPrefs {
@@ -213,9 +213,9 @@ function TranscribeTab() {
   };
 
   const options: Array<{ v: LocalPrefs["transcriptionModel"]; label: string; desc: string }> = [
-    { v: "medium", label: "nb-whisper Medium", desc: "Norsk, rask og nøyaktig. Standard." },
-    { v: "large", label: "nb-whisper Large", desc: "Norsk, høyest nøyaktighet — bruker mer ressurser." },
-    { v: "openai", label: "OpenAI Whisper", desc: "Flerspråklig fallback. Brukes hvis nb-whisper er nede." },
+    { v: "openai", label: "OpenAI Whisper", desc: "Whisper-large-v2 (1.55B params). Robust på fjernstemmer og bakgrunnsstøy. Standard og anbefalt for møterom." },
+    { v: "large", label: "nb-whisper Large", desc: "Norsk-finetunet, høyest presisjon på norsk språk og fagord. Krever at HF-endepunktet er aktivt." },
+    { v: "medium", label: "nb-whisper Medium", desc: "Norsk-finetunet, raskere men mindre robust på rotete lyd. Velg dette kun hvis lyden er nær mikrofonen og ren." },
   ];
 
   return (
