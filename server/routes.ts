@@ -1444,7 +1444,7 @@ Hvis ingen advarsler: { "warnings": [] }`;
         return res.status(400).json({ error: "Ugyldig forespørsel", details: parsed.error.issues });
       }
       
-      const { transcript, savedQuestions, seriesSummaries, approvedActions, pendingActions, confirmedDecisions, metadata } = parsed.data;
+      const { transcript, savedQuestions, seriesSummaries, approvedActions, pendingActions, confirmedDecisions, metadata, visualContext } = parsed.data;
       
       if (!transcript || transcript.trim().length === 0) {
         return res.json({ summary: "Ingen transkript å oppsummere." });
@@ -1490,6 +1490,10 @@ Hvis ingen advarsler: { "warnings": [] }`;
         : "";
       
       const metadataSection = metadata ? `\n\nMetadata:\n${JSON.stringify(metadata, null, 2)}` : "";
+
+      const visualContextSection = (visualContext && visualContext.length > 0)
+        ? `\n\nVISUELL KONTEKST (skjermbilder fra møtet, AI-tolkede beskrivelser):\nDisse skal vises som inline bilder i referatet med markdown-syntaks \`![beskrivelse](screenshot:ID)\` der ID er bilde-IDen. Plasser dem ved siden av relevante avsnitt der innholdet diskuteres. Bruk beskrivelsen for å forstå konteksten i samtalen — ofte refererer transkriptet til "som dere ser her" eller "på denne tegningen", og det er disse bildene de mente.\n\n${visualContext.map(v => `- ID ${v.id} (kl ${new Date(v.capturedAt).toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}): ${v.description}`).join("\n")}`
+        : "";
       
       const systemPrompt = `You are an expert Norwegian meeting minutes writer.${summaryPreferencesSection}
 
@@ -1624,7 +1628,7 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
           },
           {
             role: "user",
-            content: `Her er transkripsjonen fra møtet:\n\n${transcript}${questionsSection}${actionsSection}${decisionsSection}${metadataSection}${seriesContextForSummary}`
+            content: `Her er transkripsjonen fra møtet:\n\n${transcript}${questionsSection}${actionsSection}${decisionsSection}${metadataSection}${visualContextSection}${seriesContextForSummary}`
           }
         ],
         max_tokens: 4500,
@@ -2599,6 +2603,131 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
       res.json({ success: deleted });
     } catch (error: any) {
       console.error("Meeting document delete error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============= Skjermbilder med AI-tolkning =============
+
+  // POST /api/screenshots/analyze — tolk bilde uten å lagre. Brukes for
+  // forhåndsvisning under møtet før bruker bestemmer om bildet skal beholdes.
+  app.post("/api/screenshots/analyze", requireAuth, async (req, res) => {
+    try {
+      const { imageData, mimeType, recentTranscript } = req.body as {
+        imageData?: string;
+        mimeType?: string;
+        recentTranscript?: string;
+      };
+      if (!imageData) return res.status(400).json({ error: "imageData mangler" });
+
+      const dataUrl = imageData.startsWith("data:")
+        ? imageData
+        : `data:${mimeType || "image/jpeg"};base64,${imageData}`;
+
+      const contextHint = recentTranscript && recentTranscript.trim()
+        ? `\n\nDe siste utsagnene fra møtet (for kontekst): ${recentTranscript.slice(-800)}`
+        : "";
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `Du er en assistent for et byggteknisk møte-referat. Brukeren deler skjerm der de viser bygg-relaterte ressurser: 3D-BIM-modeller, plantegninger, snitt, fasader, framdriftsplaner, taktplaner, regneark, dokumenter eller liknende.
+
+Beskriv hva bildet viser på norsk med ~3-5 setninger. Fokuser på det som er FAGLIG RELEVANT for et byggemøte:
+- Hvis 3D-modell: hvilke fag/elementer er synlige (bærekonstruksjon, HVAC, arkitektur), hvilken vinkel/etasje, eventuelle markerte kollisjoner.
+- Hvis plantegning/snitt: hvilken etasje/akse, hvilke rom eller områder som er fokus, eventuelle markeringer (oransje sirkel, røde piler).
+- Hvis framdriftsplan/Gantt: hvilket prosjekt, hvilken periode, eventuelle kritiske aktiviteter eller milepæler.
+- Hvis regneark/tabell: hva som måles eller sammenliknes, gjør et anslag av nøkkeltall hvis lesbart.
+- Hvis dokument/tekst: kort om hva dokumentet handler om.
+
+IKKE beskriv UI-elementer som menyer eller knapper med mindre de er relevante for innholdet. IKKE finn på data du ikke ser. Hvis bildet er uklart eller ikke faglig relevant, si det kort.`,
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `Beskriv dette skjermbildet kort og presist.${contextHint}` },
+              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+            ] as any,
+          },
+        ],
+        max_tokens: 400,
+        temperature: 0.3,
+      });
+
+      const description = response.choices[0]?.message?.content?.trim() || "";
+      res.json({ description });
+    } catch (error: any) {
+      console.error("Screenshot analyze error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET /api/screenshots?sessionId=X
+  app.get("/api/screenshots", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const sessionId = req.query.sessionId ? parseInt(req.query.sessionId as string, 10) : undefined;
+      const list = await storage.getMeetingScreenshots(userId, sessionId);
+      res.json({ screenshots: list });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST /api/screenshots — lagre etter at bruker har valgt å beholde
+  app.post("/api/screenshots", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const { imageData, mimeType, description, sessionId, includedInSummary } = req.body as {
+        imageData: string;
+        mimeType?: string;
+        description: string;
+        sessionId?: number | null;
+        includedInSummary?: boolean;
+      };
+      if (!imageData || !description) return res.status(400).json({ error: "imageData og description er påkrevd" });
+      const created = await storage.createMeetingScreenshot(userId, {
+        sessionId: sessionId ?? null,
+        imageData,
+        mimeType: mimeType || "image/jpeg",
+        description,
+        includedInSummary: includedInSummary ?? false,
+      });
+      res.json({ screenshot: created });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PATCH /api/screenshots/:id — toggle includedInSummary, oppdater beskrivelse
+  app.patch("/api/screenshots/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
+      const updates: Record<string, unknown> = {};
+      if (typeof req.body.includedInSummary === "boolean") updates.includedInSummary = req.body.includedInSummary;
+      if (typeof req.body.description === "string") updates.description = req.body.description;
+      if (typeof req.body.sessionId === "number") updates.sessionId = req.body.sessionId;
+      const updated = await storage.updateMeetingScreenshot(userId, id, updates);
+      if (!updated) return res.status(404).json({ error: "Ikke funnet" });
+      res.json({ screenshot: updated });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // DELETE /api/screenshots/:id
+  app.delete("/api/screenshots/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
+      await storage.deleteMeetingScreenshot(userId, id);
+      res.json({ success: true });
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });

@@ -1,4 +1,4 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
@@ -63,6 +63,12 @@ export interface IStorage {
   createInterviewSession(userId: string, data: Omit<InsertInterviewSession, "userId">): Promise<InterviewSession>;
   updateInterviewSession(userId: string, id: number, updates: Record<string, unknown>): Promise<InterviewSession | undefined>;
   deleteInterviewSession(userId: string, id: number): Promise<boolean>;
+
+  // Meeting screenshots
+  getMeetingScreenshots(userId: string, sessionId?: number): Promise<MeetingScreenshot[]>;
+  createMeetingScreenshot(userId: string, data: Omit<InsertMeetingScreenshot, "userId">): Promise<MeetingScreenshot>;
+  updateMeetingScreenshot(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingScreenshot | undefined>;
+  deleteMeetingScreenshot(userId: string, id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -380,6 +386,36 @@ export class DatabaseStorage implements IStorage {
   async deleteInterviewSession(userId: string, id: number): Promise<boolean> {
     const result = await db.delete(interviewSessions)
       .where(and(eq(interviewSessions.id, id), eq(interviewSessions.userId, userId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  // ============= Meeting screenshots =============
+
+  async getMeetingScreenshots(userId: string, sessionId?: number): Promise<MeetingScreenshot[]> {
+    const rows = await db.select().from(meetingScreenshots)
+      .where(eq(meetingScreenshots.userId, userId))
+      .orderBy(desc(meetingScreenshots.capturedAt));
+    if (sessionId !== undefined) return rows.filter(r => r.sessionId === sessionId);
+    return rows;
+  }
+
+  async createMeetingScreenshot(userId: string, data: Omit<InsertMeetingScreenshot, "userId">): Promise<MeetingScreenshot> {
+    const [row] = await db.insert(meetingScreenshots).values({ ...data, userId } as any).returning();
+    return row;
+  }
+
+  async updateMeetingScreenshot(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingScreenshot | undefined> {
+    const [row] = await db.update(meetingScreenshots)
+      .set(updates)
+      .where(and(eq(meetingScreenshots.id, id), eq(meetingScreenshots.userId, userId)))
+      .returning();
+    return row;
+  }
+
+  async deleteMeetingScreenshot(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(meetingScreenshots)
+      .where(and(eq(meetingScreenshots.id, id), eq(meetingScreenshots.userId, userId)))
       .returning();
     return result.length > 0;
   }
