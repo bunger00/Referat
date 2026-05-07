@@ -1,4 +1,4 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
@@ -69,6 +69,14 @@ export interface IStorage {
   createMeetingScreenshot(userId: string, data: Omit<InsertMeetingScreenshot, "userId">): Promise<MeetingScreenshot>;
   updateMeetingScreenshot(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingScreenshot | undefined>;
   deleteMeetingScreenshot(userId: string, id: number): Promise<boolean>;
+
+  // Community learning (cross-user, anonymized)
+  getCommunitySignals(filter?: { status?: string; signalType?: string }): Promise<CommunitySignal[]>;
+  createCommunitySignal(data: InsertCommunitySignal): Promise<CommunitySignal>;
+  updateCommunitySignal(id: number, updates: Record<string, unknown>): Promise<CommunitySignal | undefined>;
+  incrementSignalContributors(id: number): Promise<void>;
+  setCommunityOptOut(userId: string, optOut: boolean): Promise<void>;
+  incrementCommunityContributions(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -418,6 +426,71 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(meetingScreenshots.id, id), eq(meetingScreenshots.userId, userId)))
       .returning();
     return result.length > 0;
+  }
+
+  // ============= Community learning =============
+
+  async getCommunitySignals(filter?: { status?: string; signalType?: string }): Promise<CommunitySignal[]> {
+    const all = await db.select().from(communitySignals).orderBy(desc(communitySignals.updatedAt));
+    return all.filter(s => {
+      if (filter?.status && s.status !== filter.status) return false;
+      if (filter?.signalType && s.signalType !== filter.signalType) return false;
+      return true;
+    });
+  }
+
+  async createCommunitySignal(data: InsertCommunitySignal): Promise<CommunitySignal> {
+    const [row] = await db.insert(communitySignals).values(data as any).returning();
+    return row;
+  }
+
+  async updateCommunitySignal(id: number, updates: Record<string, unknown>): Promise<CommunitySignal | undefined> {
+    const [row] = await db.update(communitySignals)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(communitySignals.id, id))
+      .returning();
+    return row;
+  }
+
+  async incrementSignalContributors(id: number): Promise<void> {
+    const [existing] = await db.select().from(communitySignals).where(eq(communitySignals.id, id));
+    if (existing) {
+      await db.update(communitySignals)
+        .set({ contributors: existing.contributors + 1, updatedAt: new Date() })
+        .where(eq(communitySignals.id, id));
+    }
+  }
+
+  async setCommunityOptOut(userId: string, optOut: boolean): Promise<void> {
+    const existing = await this.getAiPreferences(userId);
+    if (existing) {
+      await db.update(aiPreferences)
+        .set({ communityOptOut: optOut, updatedAt: new Date() })
+        .where(eq(aiPreferences.userId, userId));
+    } else {
+      await db.insert(aiPreferences).values({
+        userId,
+        profileText: "",
+        signalCount: 0,
+        communityOptOut: optOut,
+      } as any);
+    }
+  }
+
+  async incrementCommunityContributions(userId: string): Promise<void> {
+    const existing = await this.getAiPreferences(userId);
+    if (existing) {
+      await db.update(aiPreferences)
+        .set({ communityContributions: existing.communityContributions + 1, updatedAt: new Date() })
+        .where(eq(aiPreferences.userId, userId));
+    } else {
+      await db.insert(aiPreferences).values({
+        userId,
+        profileText: "",
+        signalCount: 0,
+        communityContributions: 1,
+      } as any);
+    }
   }
 }
 
