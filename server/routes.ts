@@ -1668,18 +1668,27 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
       const logs = await storage.getFeedbackLog(userId);
       if (logs.length === 0) return;
 
-      const accepted = logs.filter(l => l.accepted);
-      const rejected = logs.filter(l => !l.accepted);
-      const acceptedActions = accepted.filter(l => l.type === "action");
-      const rejectedActions = rejected.filter(l => l.type === "action");
-      const acceptedDecisions = accepted.filter(l => l.type === "decision");
-      const rejectedDecisions = rejected.filter(l => l.type === "decision");
+      // Manuelle tillegg er en SPESIELL signal-type: AI-en så transkriptet
+      // og foreslo ikke det brukeren ville ha. Vi analyserer disse separat
+      // for å bygge "miss-mønstre" — konkrete signaler AI-en skal fange neste gang.
+      const manualAdds = logs.filter(l => l.source === "manual" && l.accepted);
+      const aiAccepted = logs.filter(l => l.source !== "manual" && l.accepted);
+      const aiRejected = logs.filter(l => l.source !== "manual" && !l.accepted);
 
-      const examplesText = [
-        acceptedActions.length > 0 ? `GODKJENTE aksjonspunkter (${acceptedActions.length}):\n${acceptedActions.slice(0, 10).map(l => `- ${l.text}`).join("\n")}` : "",
-        rejectedActions.length > 0 ? `AVVISTE aksjonspunkter (${rejectedActions.length}):\n${rejectedActions.slice(0, 10).map(l => `- ${l.text}${l.reason ? ` [Årsak: ${l.reason}]` : ""}`).join("\n")}` : "",
-        acceptedDecisions.length > 0 ? `BEKREFTEDE beslutninger (${acceptedDecisions.length}):\n${acceptedDecisions.slice(0, 10).map(l => `- ${l.text}`).join("\n")}` : "",
-        rejectedDecisions.length > 0 ? `AVVISTE beslutninger (${rejectedDecisions.length}):\n${rejectedDecisions.slice(0, 10).map(l => `- ${l.text}${l.reason ? ` [Årsak: ${l.reason}]` : ""}`).join("\n")}` : "",
+      const acceptedActions = aiAccepted.filter(l => l.type === "action");
+      const rejectedActions = aiRejected.filter(l => l.type === "action");
+      const acceptedDecisions = aiAccepted.filter(l => l.type === "decision");
+      const rejectedDecisions = aiRejected.filter(l => l.type === "decision");
+      const manualActions = manualAdds.filter(l => l.type === "action");
+      const manualDecisions = manualAdds.filter(l => l.type === "decision");
+
+      const sectionsForGpt = [
+        acceptedActions.length > 0 ? `GODKJENTE AI-FORESLÅTTE aksjonspunkter (${acceptedActions.length}):\n${acceptedActions.slice(0, 10).map(l => `- ${l.text}`).join("\n")}` : "",
+        rejectedActions.length > 0 ? `AVVISTE AI-FORESLÅTTE aksjonspunkter (${rejectedActions.length}):\n${rejectedActions.slice(0, 10).map(l => `- ${l.text}${l.reason ? ` [Årsak: ${l.reason}]` : ""}`).join("\n")}` : "",
+        acceptedDecisions.length > 0 ? `BEKREFTEDE AI-FORESLÅTTE beslutninger (${acceptedDecisions.length}):\n${acceptedDecisions.slice(0, 10).map(l => `- ${l.text}`).join("\n")}` : "",
+        rejectedDecisions.length > 0 ? `AVVISTE AI-FORESLÅTTE beslutninger (${rejectedDecisions.length}):\n${rejectedDecisions.slice(0, 10).map(l => `- ${l.text}${l.reason ? ` [Årsak: ${l.reason}]` : ""}`).join("\n")}` : "",
+        manualActions.length > 0 ? `*** MANUELT LAGT TIL aksjonspunkter (${manualActions.length}) — AI-en MISSET disse, brukeren la dem til selv ***\nFor hver: tekst + utdrag av transkriptet AI-en faktisk så da hen misset.\n${manualActions.slice(0, 10).map(l => `\n[Aksjon brukeren la til]: "${l.text}"\n[Transkript AI-en så på det tidspunktet]: "${(l.context ?? "").slice(0, 700)}"`).join("\n")}` : "",
+        manualDecisions.length > 0 ? `*** MANUELT LAGT TIL beslutninger (${manualDecisions.length}) — AI-en MISSET disse, brukeren la dem til selv ***\n${manualDecisions.slice(0, 10).map(l => `\n[Beslutning brukeren la til]: "${l.text}"\n[Transkript AI-en så på det tidspunktet]: "${(l.context ?? "").slice(0, 700)}"`).join("\n")}` : "",
       ].filter(Boolean).join("\n\n");
 
       const profileResponse = await openai.chat.completions.create({
@@ -1687,26 +1696,38 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
         messages: [
           {
             role: "system",
-            content: `Du analyserer hvilke typer aksjonspunkter og beslutninger en bruker godkjenner vs. avviser, for å forbedre fremtidige AI-forslag.
-Skriv et kort profiltekst (maks 200 ord) på norsk som oppsummerer:
-- Hva slags aksjonspunkter brukeren liker å godkjenne (detaljeringsnivå, konkrethet, formuleringer)
-- Hva slags aksjonspunkter brukeren avviser — legg SÆRLIG vekt på avvisningsårsaker hvis de finnes [Årsak: ...]
-- Hva slags beslutninger brukeren bekrefter vs. avviser — inkluder årsaker i analysen
-- Eventuelle mønstre i aksjonspunkter som ble manuelt lagt til
+            content: `Du oppdaterer en AI-profil som brukes av et møtereferat-system for å foreslå aksjonspunkter og beslutninger. Profilen skal bli BEDRE av hver økt.
 
-Skriv profilteksten som en instruksjon til deg selv: "Brukeren foretrekker aksjonspunkter som..."
-Vær konkret og handlingsorientert. Avvisningsårsaker er spesielt verdifulle — bruk dem aktivt.`,
+Du får tre typer signaler:
+1. AI-FORESLÅTTE som brukeren GODKJENTE → bra, gjør mer av dette
+2. AI-FORESLÅTTE som brukeren AVVISTE (med årsak) → unngå dette, lytt til årsaken
+3. MANUELT LAGT TIL — disse er KRITISK læring: AI-en så et stykke transkript men foreslo ikke det brukeren ville ha. Det betyr AI-en misset et signal. Sammenlign tekst-aksjonen med transkriptutdraget og identifiser HVILKEN frase, HVILKET ord, HVILKEN type ytring som signaliserte at dette var en aksjon.
+
+Skriv en profil (maks 350 ord) på norsk strukturert slik:
+
+## Slik foretrekker brukeren aksjoner og beslutninger
+[Stil, detaljnivå, formuleringer brukeren liker]
+
+## Mønstre å unngå
+[Avvisningsårsaker — bruk konkrete eksempler]
+
+## Signaler AI-EN MISSET — fang disse neste gang
+[For hvert manuelt tillegg: en konkret regel. Eksempel:
+"Når noen sier 'kan vi få en oversikt over X til neste møte' → fang som aksjon (rapport-aksjon med deadline=neste møte). I forrige sesjon misset jeg dette i konteksten '...vi trenger oversikt over...' "
+"Når noen sier 'jeg sender deg den' → fang som aksjon med ansvarlig=taler. Jeg misset det i konteksten '...send meg planen i morgen...'"]
+
+Vær SVÆRT konkret med signaler — generelle råd som "fang flere aksjoner" er verdiløse. Bruk faktiske utdrag fra transkriptkonteksten du fikk.`,
           },
-          { role: "user", content: examplesText },
+          { role: "user", content: sectionsForGpt || "Ingen feedback ennå." },
         ],
-        max_tokens: 400,
-        temperature: 0.3,
+        max_tokens: 700,
+        temperature: 0.25,
       });
 
       const profileText = profileResponse.choices[0]?.message?.content || "";
       if (profileText) {
         await storage.setAiPreferences(userId, profileText, logs.length);
-        console.log("AI preferences updated, signal count:", logs.length);
+        console.log("AI preferences updated, signal count:", logs.length, "manuelt lagt til:", manualAdds.length);
       }
     } catch (err: any) {
       console.error("Error updating AI profile:", err.message);
