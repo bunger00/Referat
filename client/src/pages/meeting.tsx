@@ -394,11 +394,17 @@ export default function MeetingPage() {
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const [audioLevelBars, setAudioLevelBars] = useState<number[]>(Array(20).fill(0));
 
-  const savedQuestions = questions.filter(q => q.status === "saved");
+  const savedQuestions = [...questions]
+    .filter(q => q.status === "saved")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const activeQuestions = questions.filter(q => q.status === "new");
-  const pendingActions = proposedActions.filter(a => a.status === "proposed");
+  // Nyeste pending-forslag øverst (basert på createdAt). Approved/confirmed
+  // beholder kronologisk rekkefølge slik at den nummererte listen blir stabil.
+  const sortNewestFirst = <T extends { createdAt: string }>(arr: T[]): T[] =>
+    [...arr].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const pendingActions = sortNewestFirst(proposedActions.filter(a => a.status === "proposed"));
   const approvedActions = proposedActions.filter(a => a.status === "approved");
-  const pendingDecisions = proposedDecisions.filter(d => d.status === "proposed");
+  const pendingDecisions = sortNewestFirst(proposedDecisions.filter(d => d.status === "proposed"));
   const confirmedDecisions = proposedDecisions.filter(d => d.status === "confirmed");
 
   useEffect(() => {
@@ -579,6 +585,10 @@ export default function MeetingPage() {
       }
       groups[q.minuteIndex].push(q);
     });
+    // Nyeste spørsmål først innen hvert minutt
+    for (const k of Object.keys(groups)) {
+      groups[Number(k)].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
     return groups;
   };
 
