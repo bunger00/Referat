@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute } from "wouter";
+import {
+  AIWorkbench,
+  LiveTranscript,
+  MeetingTopbar,
+  MeetingBottombar,
+} from "@/components/meeting";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -71,6 +77,7 @@ import {
   Calendar,
   Wrench,
   SlidersHorizontal,
+  MoreVertical,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { TranscriptSegment, Question, ActionItem, ProposedDecision, MeetingState, MeetingMeta, ExpertRole, Warning, ExtractedRule, UploadedDocument, SeriesSummary, MeetingSeriesRow, MeetingDocument, WordCorrection } from "@shared/schema";
@@ -202,6 +209,7 @@ export default function MeetingPage() {
   const meetingDocFileRef = useRef<HTMLInputElement>(null);
 
   const [autoScroll, setAutoScroll] = useState(true);
+  const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState<"transcript" | "ai">("transcript");
   const [transcriptionModel, setTranscriptionModel] = useState<"medium" | "large" | "openai">("medium");
   const [transcriptionEngine, setTranscriptionEngine] = useState<string | null>(null);
   const [isCleaningTranscript, setIsCleaningTranscript] = useState(false);
@@ -1052,6 +1060,68 @@ export default function MeetingPage() {
   const rejectDecision = (decisionId: string) => {
     const decision = proposedDecisions.find(d => d.id === decisionId);
     if (decision) setRejectTarget({ type: "decision", id: decisionId, text: decision.text });
+  };
+
+  // Inline approve/confirm handlers — used by new ActionCard / DecisionCard
+  // components. Bypasses the modal flow.
+  const inlineApproveAction = (id: string, edits: { text: string; owner: string; deadline: string }) => {
+    const finalText = edits.text.trim();
+    setProposedActions(prev => prev.map(a =>
+      a.id === id
+        ? { ...a, text: finalText || a.text, status: "approved" as const, owner: edits.owner.trim() || undefined, deadline: edits.deadline.trim() || undefined }
+        : a
+    ));
+    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: finalText || "", accepted: true, source: "ai" }) }).catch(console.error);
+    toast({ title: "Aksjon godkjent" });
+  };
+
+  const inlineConfirmDecision = (id: string, edits: { text: string }) => {
+    const finalText = edits.text.trim();
+    let context: string | undefined;
+    setProposedDecisions(prev => prev.map(d => {
+      if (d.id !== id) return d;
+      context = d.context;
+      return { ...d, text: finalText || d.text, status: "confirmed" as const, confirmedAt: new Date().toISOString() };
+    }));
+    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: finalText || "", context, accepted: true, source: "ai" }) }).catch(console.error);
+    toast({ title: "Beslutning bekreftet" });
+  };
+
+  const inlineAddAction = (fields: { text: string; owner: string; deadline: string }) => {
+    if (!fields.text.trim()) return;
+    const newAction: ActionItem = {
+      id: `a-manual-${Date.now()}`,
+      text: fields.text.trim(),
+      suggestedOwner: fields.owner.trim() || null,
+      suggestedDeadline: fields.deadline.trim() || null,
+      status: "approved" as const,
+      source: "manual" as const,
+      owner: fields.owner.trim() || undefined,
+      deadline: fields.deadline.trim() || undefined,
+      minuteIndex: Math.floor(elapsedSeconds / 60),
+      createdAt: new Date().toISOString(),
+    };
+    setProposedActions(prev => [...prev, newAction]);
+    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
+    toast({ title: "Aksjon lagt til" });
+  };
+
+  const inlineAddDecision = (fields: { text: string; owner: string; context: string }) => {
+    if (!fields.text.trim()) return;
+    const newDecision: ProposedDecision = {
+      id: `d-manual-${Date.now()}`,
+      text: fields.text.trim(),
+      context: fields.context.trim() || undefined,
+      owner: fields.owner.trim() || undefined,
+      status: "confirmed" as const,
+      source: "manual" as const,
+      confirmedAt: new Date().toISOString(),
+      minuteIndex: Math.floor(elapsedSeconds / 60),
+      createdAt: new Date().toISOString(),
+    };
+    setProposedDecisions(prev => [...prev, newDecision]);
+    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
+    toast({ title: "Beslutning lagt til" });
   };
 
   // Manual add handlers
@@ -2535,443 +2605,6 @@ export default function MeetingPage() {
     .map(Number)
     .sort((a, b) => b - a);
 
-  // Settings sheet content - reusable for mobile and desktop (as JSX, not a component, to prevent dropdown closing on re-render)
-  const settingsContent = (
-    <div className="space-y-6">
-      {/* Expert Role Selection */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium flex items-center gap-2">
-          <Brain className="h-4 w-4 text-muted-foreground" />
-          Ekspertprofil
-        </label>
-        <Select 
-          value={expertRole} 
-          onValueChange={(value) => setExpertRole(value as ExpertRole)}
-        >
-          <SelectTrigger className="w-full" data-testid="select-expert-role">
-            <SelectValue placeholder="Velg ekspert" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="bygg" data-testid="expert-option-bygg">
-              Bygg & Prosjekt
-            </SelectItem>
-            <SelectItem value="hr" data-testid="expert-option-hr">
-              HR & Arbeidsmiljø
-            </SelectItem>
-            <SelectItem value="jus" data-testid="expert-option-jus">
-              Jus & Kontrakt
-            </SelectItem>
-            <SelectItem value="uformell" data-testid="expert-option-uformell">
-              Djevelens advokat
-            </SelectItem>
-            <SelectItem value="pappa" data-testid="expert-option-pappa">
-              Pappa-vitser
-            </SelectItem>
-            <SelectItem value="sureaud" data-testid="expert-option-sureaud">
-              Sure-Aud
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Question Interval Selection */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium flex items-center gap-2">
-          <Timer className="h-4 w-4 text-muted-foreground" />
-          Spørsmålsintervall
-        </label>
-        <Select 
-          value={questionInterval.toString()} 
-          onValueChange={(value) => setQuestionInterval(parseInt(value))}
-        >
-          <SelectTrigger className="w-full" data-testid="select-question-interval">
-            <SelectValue placeholder="Intervall" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1" data-testid="interval-option-1">
-              Hvert minutt
-            </SelectItem>
-            <SelectItem value="5" data-testid="interval-option-5">
-              Hvert 5. min
-            </SelectItem>
-            <SelectItem value="15" data-testid="interval-option-15">
-              Hvert 15. min
-            </SelectItem>
-            <SelectItem value="0" data-testid="interval-option-manual">
-              Kun manuelt
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Transcription model selection */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium flex items-center gap-2">
-          <Mic className="h-4 w-4 text-muted-foreground" />
-          Transkripsjonmodell
-        </label>
-        <Select
-          value={transcriptionModel}
-          onValueChange={(v) => setTranscriptionModel(v as "medium" | "large" | "openai")}
-          disabled={isRecording}
-        >
-          <SelectTrigger className="w-full" data-testid="select-transcription-model-mobile">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="medium">🇳🇴 nb-whisper Medium (raskere)</SelectItem>
-            <SelectItem value="large">🇳🇴 nb-whisper Large (mer nøyaktig)</SelectItem>
-            <SelectItem value="openai">⚡ OpenAI Whisper</SelectItem>
-          </SelectContent>
-        </Select>
-        {isRecording && <p className="text-xs text-muted-foreground">Kan ikke byttes under opptak</p>}
-      </div>
-
-      {/* Manual Generate Button */}
-      <Button
-        variant="outline"
-        onClick={() => {
-          handleManualGenerate();
-          setSettingsOpen(false);
-        }}
-        disabled={transcript.length === 0 || isGeneratingQuestions}
-        data-testid="button-manual-generate"
-        className="w-full gap-2"
-      >
-        {isGeneratingQuestions ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Sparkles className="h-4 w-4" />
-        )}
-        Generer spørsmål nå
-      </Button>
-
-      {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploadingFile || isRecording}
-          data-testid="button-upload-file"
-          className="gap-2"
-        >
-          {isUploadingFile ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Upload className="h-4 w-4" />
-          )}
-          Last opp
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={exportTranscriptAsTxt}
-          disabled={transcript.length === 0}
-          data-testid="button-export-txt"
-          className="gap-2"
-        >
-          <Download className="h-4 w-4" />
-          Eksporter
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={generateSummary}
-          disabled={transcript.length === 0 || isGeneratingSummary}
-          data-testid="button-generate-summary"
-          className="gap-2"
-        >
-          {isGeneratingSummary ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <FileText className="h-4 w-4" />
-          )}
-          {meetingSummary ? "Vis referat" : "Lag referat"}
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={() => {
-            openSaveDialog();
-            setSettingsOpen(false);
-          }}
-          disabled={isSavingSession || (transcript.length === 0 && questions.length === 0)}
-          data-testid="button-save-session"
-          className="gap-2"
-        >
-          {isSavingSession ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          {sessionId ? "Oppdater sesjon" : "Lagre sesjon"}
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={() => {
-            setShowSessionsDialog(true);
-            setSettingsOpen(false);
-          }}
-          data-testid="button-load-sessions"
-          className="gap-2"
-        >
-          <History className="h-4 w-4" />
-          Tidligere møter
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={() => {
-            setShowAudioUploadDialog(true);
-            setSettingsOpen(false);
-          }}
-          data-testid="button-audio-upload"
-          className="gap-2"
-        >
-          <FileUp className="h-4 w-4" />
-          Last opp lydfil
-        </Button>
-        
-        <Button
-          variant="outline"
-          onClick={() => {
-            setShowRulesDialog(true);
-            setSettingsOpen(false);
-          }}
-          data-testid="button-rules"
-          className="gap-2"
-        >
-          <BookOpen className="h-4 w-4" />
-          Regeldokumenter
-          {ruleCount > 0 && (
-            <Badge variant="secondary" className="ml-1">
-              {ruleCount}
-            </Badge>
-          )}
-        </Button>
-
-        <Button
-          variant="outline"
-          onClick={() => {
-            setShowWordCorrectionsDialog(true);
-            setSettingsOpen(false);
-          }}
-          data-testid="button-word-corrections"
-          className="gap-2"
-        >
-          <Replace className="h-4 w-4" />
-          Ordkorrigeringer
-          {wordCorrectionsList.length > 0 && (
-            <Badge variant="secondary" className="ml-1">{wordCorrectionsList.length}</Badge>
-          )}
-        </Button>
-
-        <Button
-          variant="outline"
-          onClick={() => {
-            fetchMeetingKnowledgeDocs();
-            setShowMeetingDocsDialog(true);
-            setSettingsOpen(false);
-          }}
-          data-testid="button-meeting-docs"
-          className="gap-2"
-        >
-          <FolderOpen className="h-4 w-4" />
-          Møtedokumenter
-          {meetingKnowledgeDocs.length > 0 && (
-            <Badge variant="secondary" className="ml-1">
-              {meetingKnowledgeDocs.length}
-            </Badge>
-          )}
-        </Button>
-
-        <Button
-          variant="outline"
-          onClick={() => {
-            openLearningDialog();
-            setSettingsOpen(false);
-          }}
-          data-testid="button-learning"
-          className="gap-2"
-        >
-          <Lightbulb className="h-4 w-4" />
-          Hva har appen lært?
-        </Button>
-      </div>
-
-      {/* New / Clear meeting */}
-      <div className="grid grid-cols-2 gap-2">
-        <Button
-          variant="outline"
-          onClick={() => {
-            newMeeting();
-            setSettingsOpen(false);
-          }}
-          disabled={isRecording}
-          data-testid="button-new-meeting-mobile"
-          className="gap-2"
-        >
-          <FilePlus2 className="h-4 w-4" />
-          Nytt møte
-        </Button>
-
-        {(transcript.length > 0 || questions.length > 0) && !isRecording && (
-          <Button
-            variant="outline"
-            onClick={() => {
-              clearMeeting();
-              setSettingsOpen(false);
-            }}
-            data-testid="button-clear-meeting"
-            className="gap-2 text-destructive hover:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-            Nullstill
-          </Button>
-        )}
-      </div>
-
-    </div>
-  );
-
-  // Transcript segment rendering
-  const renderTranscriptSegment = (segment: TranscriptSegment) => (
-    <div 
-      key={segment.id} 
-      className="pb-3 border-b border-border/50 last:border-0"
-      data-testid={`transcript-segment-${segment.id}`}
-    >
-      <div className="flex items-center gap-2 mb-1">
-        <span
-          className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-          data-testid={`speaker-label-${segment.id}`}
-        >
-          {segment.speaker}
-        </span>
-        <span className="text-xs text-muted-foreground/60">
-          [{new Date(segment.timestamp).toLocaleTimeString("no-NO", { 
-            hour: "2-digit", 
-            minute: "2-digit" 
-          })}]
-        </span>
-      </div>
-      <p className="text-sm sm:text-base leading-relaxed">
-        {segment.text}
-      </p>
-    </div>
-  );
-
-  // Question rendering for active questions
-  const renderActiveQuestion = (question: Question) => {
-    const isCrossMeeting = question.type === "cross_meeting";
-    return (
-      <div
-        key={question.id}
-        className={`flex flex-col gap-2 p-3 rounded-md border hover-elevate ${isCrossMeeting ? "border-red-400 bg-red-50 dark:bg-red-950/20 dark:border-red-700" : ""}`}
-        data-testid={`question-${question.id}`}
-      >
-        <div className="flex items-start gap-2">
-          {isCrossMeeting && <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />}
-          <p className={`text-sm flex-1 ${isCrossMeeting ? "text-red-800 dark:text-red-200 font-medium" : ""}`}>{question.text}</p>
-          <div className="flex gap-1 flex-shrink-0">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
-              onClick={() => handleSaveQuestion(question.id)}
-              data-testid={`button-save-${question.id}`}
-              aria-label="Lagre spørsmål"
-            >
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={() => handleDeleteQuestion(question.id)}
-              data-testid={`button-delete-${question.id}`}
-              aria-label="Slett spørsmål"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {isCrossMeeting && (
-            <Badge variant="outline" className="text-xs border-red-400 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30">
-              Motstrid fra tidligere møte
-            </Badge>
-          )}
-          {question.expertRole && !isCrossMeeting && (
-            <Badge variant="secondary" className="text-xs w-fit">
-              {expertRoleLabels[question.expertRole]}
-            </Badge>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Saved question rendering
-  const renderSavedQuestion = (question: Question) => {
-    const isCrossMeeting = question.type === "cross_meeting";
-    return (
-      <div 
-        key={question.id}
-        className={`p-3 rounded-md space-y-2 ${isCrossMeeting ? "bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-700" : "bg-primary/5"}`}
-        data-testid={`saved-question-${question.id}`}
-      >
-        <div className="flex items-start gap-2">
-          {isCrossMeeting
-            ? <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-            : <Check className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-          }
-          <p className={`text-sm flex-1 ${isCrossMeeting ? "text-red-800 dark:text-red-200 font-medium" : ""}`}>{question.text}</p>
-          <div className="flex gap-1 flex-shrink-0">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6"
-              onClick={() => handleEditQuestion(question)}
-              data-testid={`button-edit-${question.id}`}
-              aria-label="Rediger spørsmål"
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6"
-              onClick={() => handleRemoveSavedQuestion(question.id)}
-              data-testid={`button-remove-saved-${question.id}`}
-              aria-label="Fjern spørsmål"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 ml-6">
-          {isCrossMeeting && (
-            <Badge variant="outline" className="text-xs border-red-400 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30">
-              Motstrid fra tidligere møte
-            </Badge>
-          )}
-          {question.expertRole && !isCrossMeeting && (
-            <Badge variant="secondary" className="text-xs">
-              {expertRoleLabels[question.expertRole]}
-            </Badge>
-          )}
-          {question.annotation && (
-            <span className="text-xs text-muted-foreground italic">
-              Notat: {question.annotation}
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
       {/* Hidden file input */}
@@ -2983,1428 +2616,214 @@ export default function MeetingPage() {
         className="hidden"
         data-testid="input-file-upload"
       />
-      
-      {/* Fixed header - always at top */}
-      <header className="flex-shrink-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-3">
-          {/* Timer and status - always visible */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span className="font-mono text-sm tabular-nums" data-testid="text-timer">
-                {formatTime(elapsedSeconds)}
-              </span>
-            </div>
-            {isProcessing && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-            {sessionTitle && (
-              <Badge variant="outline" className="text-xs hidden sm:flex gap-1 max-w-[160px]">
-                <Save className="h-3 w-3 shrink-0" />
-                <span className="truncate">{sessionTitle}</span>
-              </Badge>
-            )}
-            {isRecording && (
-              <Badge variant="secondary" className="animate-pulse text-xs hidden sm:flex">
-                <span className="w-1.5 h-1.5 bg-destructive rounded-full mr-1.5" />
-                Tar opp
-              </Badge>
-            )}
-            {transcriptionEngine && (
-              <Badge
-                variant="outline"
-                className={`text-xs font-medium hidden sm:flex ${transcriptionEngine?.startsWith("nb-whisper") ? "border-green-500 text-green-700 dark:text-green-400" : "border-yellow-500 text-yellow-700 dark:text-yellow-400"}`}
-                title={transcriptionEngine?.startsWith("nb-whisper") ? `Norsk NbAiLab ${transcriptionEngine}` : "OpenAI Whisper"}
+
+      <MeetingTopbar
+        title={sessionTitle}
+        onTitleChange={setSessionTitle}
+        elapsedSeconds={elapsedSeconds}
+        isRecording={isRecording}
+        isProcessing={isProcessing}
+        transcriptionEngine={transcriptionEngine}
+        onGenerateSummary={() => generateSummary()}
+        isGeneratingSummary={isGeneratingSummary}
+        hasSummary={!!meetingSummary}
+        menu={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Flere handlinger" className="shrink-0">
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={newMeeting} disabled={isRecording}>
+                <FilePlus2 className="h-4 w-4 mr-2" />Nytt møte
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={openSaveDialog}
+                disabled={isSavingSession || (transcript.length === 0 && questions.length === 0)}
               >
-                {transcriptionEngine?.startsWith("nb-whisper") ? `🇳🇴 ${transcriptionEngine}` : "⚡ OpenAI Whisper"}
-              </Badge>
-            )}
-            {ruleCount > 0 && (
-              <Badge 
-                variant="outline" 
-                className="text-xs cursor-pointer hidden sm:flex"
-                onClick={() => setShowRulesDialog(true)}
-                data-testid="badge-rules-indicator"
+                {isSavingSession ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                {sessionId ? "Oppdater" : "Lagre møtet"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowSessionsDialog(true)}>
+                <History className="h-4 w-4 mr-2" />Tidligere møter
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setShowAudioUploadDialog(true)}>
+                <Mic2 className="h-4 w-4 mr-2" />Importer lydopptak
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportTranscriptAsTxt} disabled={transcript.length === 0}>
+                <Download className="h-4 w-4 mr-2" />Eksporter transkript
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleManualGenerate}
+                disabled={transcript.length === 0 || isGeneratingQuestions}
               >
-                <BookOpen className="h-3 w-3 mr-1" />
-                {ruleCount} regler
-              </Badge>
-            )}
-            {warnings.length > 0 && (
-              <Badge 
-                variant="destructive" 
-                className="text-xs animate-pulse"
-                data-testid="badge-warnings-indicator"
-              >
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                {warnings.length}
-              </Badge>
-            )}
-          </div>
-          
-          {/* Desktop controls — slank header med menyer */}
-          <TooltipProvider delayDuration={400}>
-          <div className="hidden lg:flex items-center gap-2">
-            {/* Ekspertrolle — alltid synlig (mest brukt) */}
-            <Select
-              value={expertRole}
-              onValueChange={(value) => setExpertRole(value as ExpertRole)}
-            >
-              <SelectTrigger className="w-[170px] h-9" data-testid="select-expert-role-desktop">
-                <Brain className="h-4 w-4 mr-1 text-muted-foreground" />
-                <SelectValue placeholder="Velg ekspert" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="bygg">Bygg & Prosjekt</SelectItem>
-                <SelectItem value="hr">HR & Arbeidsmiljø</SelectItem>
-                <SelectItem value="jus">Jus & Kontrakt</SelectItem>
-                <SelectItem value="uformell">Djevelens advokat</SelectItem>
-                <SelectItem value="pappa">Pappa-vitser</SelectItem>
-                <SelectItem value="sureaud">Sure-Aud</SelectItem>
-              </SelectContent>
-            </Select>
+                {isGeneratingQuestions ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+                Generer spørsmål nå
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { fetchMeetingKnowledgeDocs(); setShowMeetingDocsDialog(true); }}>
+                <FolderOpen className="h-4 w-4 mr-2" />Møtedokumenter
+                {meetingKnowledgeDocs.length > 0 ? <span className="ml-auto text-xs text-muted-foreground">{meetingKnowledgeDocs.length}</span> : null}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
+      />
 
-            <div className="w-px h-5 bg-border" />
-
-            {/* Møte-meny: alle handlinger som gjelder selve møtet */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="default" className="gap-2 h-9" data-testid="menu-meeting">
-                  <Calendar className="h-4 w-4" />
-                  Møte
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel>Dette møtet</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={newMeeting}
-                  disabled={isRecording}
-                  data-testid="button-new-meeting"
-                >
-                  <FilePlus2 className="h-4 w-4 mr-2" />
-                  Nytt møte
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={openSaveDialog}
-                  disabled={isSavingSession || (transcript.length === 0 && questions.length === 0)}
-                  data-testid="button-save-session-desktop"
-                >
-                  {isSavingSession ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4 mr-2" />
-                  )}
-                  {sessionId ? `Oppdater "${sessionTitle || "møtet"}"` : "Lagre møtet"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setShowSessionsDialog(true)}
-                  data-testid="button-sessions-desktop"
-                >
-                  <History className="h-4 w-4 mr-2" />
-                  Tidligere møter
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Lyd og innhold</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() => setShowAudioUploadDialog(true)}
-                  data-testid="button-audio-upload-desktop"
-                >
-                  <Mic2 className="h-4 w-4 mr-2" />
-                  Importer lydopptak
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={exportTranscriptAsTxt}
-                  disabled={transcript.length === 0}
-                  data-testid="button-export-transcript"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Eksporter transkript (.txt)
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={generateSummary}
-                  disabled={transcript.length === 0 || isGeneratingSummary}
-                  data-testid="button-generate-summary"
-                >
-                  {isGeneratingSummary ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <ScrollText className="h-4 w-4 mr-2" />
-                  )}
-                  {isGeneratingSummary ? "Genererer referat…" : meetingSummary ? "Vis møtereferat" : "Lag møtereferat"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Verktøy-meny: AI-instillinger og kunnskapsbaser */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="default" className="gap-2 h-9 relative" data-testid="menu-tools">
-                  <SlidersHorizontal className="h-4 w-4" />
-                  Verktøy
-                  <ChevronDown className="h-3 w-3 opacity-60" />
-                  {(ruleCount > 0 || wordCorrectionsList.length > 0 || meetingKnowledgeDocs.length > 0) && (
-                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
-                      {ruleCount + wordCorrectionsList.length + meetingKnowledgeDocs.length}
-                    </span>
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>AI-handlinger</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={handleManualGenerate}
-                  disabled={transcript.length === 0 || isGeneratingQuestions}
-                  data-testid="button-generate-now"
-                >
-                  {isGeneratingQuestions ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-4 w-4 mr-2" />
-                  )}
-                  Generer spørsmål nå
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>AI-innstillinger</DropdownMenuLabel>
-                <div className="px-2 py-1.5">
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    <Timer className="h-3 w-3" /> Spørsmålsintervall
-                  </div>
-                  <Select
-                    value={questionInterval.toString()}
-                    onValueChange={(value) => setQuestionInterval(parseInt(value))}
-                  >
-                    <SelectTrigger className="w-full h-8" data-testid="select-interval-desktop">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Hvert minutt</SelectItem>
-                      <SelectItem value="5">Hvert 5. minutt</SelectItem>
-                      <SelectItem value="15">Hvert 15. minutt</SelectItem>
-                      <SelectItem value="0">Kun manuelt</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="px-2 py-1.5">
-                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                    <Mic className="h-3 w-3" /> Transkripsjonsmodell
-                  </div>
-                  <Select
-                    value={transcriptionModel}
-                    onValueChange={(v) => setTranscriptionModel(v as "medium" | "large" | "openai")}
-                    disabled={isRecording}
-                  >
-                    <SelectTrigger className="w-full h-8" data-testid="select-transcription-model-desktop">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="medium">🇳🇴 nb-whisper Medium</SelectItem>
-                      <SelectItem value="large">🇳🇴 nb-whisper Large</SelectItem>
-                      <SelectItem value="openai">⚡ OpenAI Whisper</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Kunnskapsbaser</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() => setShowRulesDialog(true)}
-                  data-testid="button-rules-desktop"
-                >
-                  <BookOpen className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Regeldokumenter</span>
-                  {ruleCount > 0 && (
-                    <span className="ml-2 text-xs text-muted-foreground">{ruleCount}</span>
-                  )}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setShowWordCorrectionsDialog(true)}
-                  data-testid="button-word-corrections-desktop"
-                >
-                  <Replace className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Ordkorrigeringer</span>
-                  {wordCorrectionsList.length > 0 && (
-                    <span className="ml-2 text-xs text-muted-foreground">{wordCorrectionsList.length}</span>
-                  )}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => { fetchMeetingKnowledgeDocs(); setShowMeetingDocsDialog(true); }}
-                  data-testid="button-meeting-docs-desktop"
-                >
-                  <FolderOpen className="h-4 w-4 mr-2" />
-                  <span className="flex-1">Møtedokumenter</span>
-                  {meetingKnowledgeDocs.length > 0 && (
-                    <span className="ml-2 text-xs text-muted-foreground">{meetingKnowledgeDocs.length}</span>
-                  )}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          </TooltipProvider>
-          
-          {/* Mobile: Settings button + Record button */}
-          <div className="flex items-center gap-2">
-            {/* Mobile settings sheet */}
-            <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="lg:hidden" data-testid="button-settings">
-                  <Settings className="h-4 w-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-[300px] sm:w-[350px]">
-                <SheetHeader>
-                  <SheetTitle>Innstillinger</SheetTitle>
-                </SheetHeader>
-                <div className="mt-6">
-                  {settingsContent}
-                </div>
-              </SheetContent>
-            </Sheet>
-            
-            {/* Record button - always visible */}
-            <Button
-              onClick={isRecording ? stopRecording : startRecording}
-              variant={isRecording ? "destructive" : "default"}
-              size="default"
-              className="gap-2"
-              disabled={isStartingRecording}
-              data-testid={isRecording ? "button-stop-meeting" : "button-start-meeting"}
-            >
-              {isRecording ? (
-                <>
-                  <MicOff className="h-4 w-4" />
-                  <span className="hidden sm:inline">Stopp</span>
-                </>
-              ) : isStartingRecording ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="hidden sm:inline">Starter...</span>
-                </>
-              ) : (
-                <>
-                  <Mic className="h-4 w-4" />
-                  <span className="hidden sm:inline">Start møte</span>
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      {/* Meeting metadata accordion */}
-      <div className="flex-shrink-0 border-b bg-muted/30">
+      {/* Møteinformasjon (collapsible) */}
+      <div className="shrink-0 border-b border-border bg-muted/20">
         <button
+          type="button"
           onClick={() => setMetaOpen(prev => !prev)}
-          className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-          data-testid="button-toggle-meta"
+          className="w-full flex items-center justify-between px-4 sm:px-6 py-2 text-xs font-medium text-muted-foreground hover-elevate"
         >
-          <span className="flex items-center gap-2">
-            <CalendarDays className="h-4 w-4" />
+          <span className="inline-flex items-center gap-2">
+            <CalendarDays className="h-3.5 w-3.5" />
             Møteinformasjon
-            {(meetingMeta.title || meetingMeta.project || meetingMeta.meetingLeader) && (
-              <Badge variant="secondary" className="text-xs">Utfylt</Badge>
-            )}
+            {(meetingMeta.title || meetingMeta.project || meetingMeta.meetingLeader) ? (
+              <span className="rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-medium">
+                Utfylt
+              </span>
+            ) : null}
           </span>
           {metaOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
-
-        {metaOpen && (
-          <div className="px-4 pb-4 pt-1">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="md:col-span-2">
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Møtetittel</label>
+        {metaOpen ? (
+          <div className="px-4 sm:px-6 pb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[
+              { label: "Møtetittel", key: "title" as const, ph: "F.eks. Byggemøte uke 15", span: "md:col-span-2 lg:col-span-3" },
+              { label: "Prosjekt", key: "project" as const, ph: "Prosjektnavn" },
+              { label: "Kunde", key: "client" as const, ph: "Kunde / oppdragsgiver" },
+              { label: "Sted", key: "location" as const, ph: "F.eks. Byggeplass, Teams" },
+              { label: "Møteleder", key: "meetingLeader" as const, ph: "Navn" },
+              { label: "Referent", key: "secretary" as const, ph: "Navn (valgfritt)" },
+              { label: "Deltakere", key: "participants" as const, ph: "Navn, kommaseparert" },
+              { label: "Fraværende", key: "absent" as const, ph: "Navn, kommaseparert" },
+            ].map(f => (
+              <div key={f.key} className={f.span ?? ""}>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">{f.label}</label>
                 <Input
-                  placeholder="F.eks. Byggemøte uke 15"
-                  value={meetingMeta.title || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, title: e.target.value }))}
-                  data-testid="input-meta-title"
-                  className="h-8 text-sm"
+                  placeholder={f.ph}
+                  value={(meetingMeta as any)[f.key] || ""}
+                  onChange={e => setMeetingMeta(prev => ({ ...prev, [f.key]: e.target.value }))}
+                  className="h-9 text-sm bg-card"
                 />
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Prosjekt</label>
-                <Input
-                  placeholder="Prosjektnavn"
-                  value={meetingMeta.project || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, project: e.target.value }))}
-                  data-testid="input-meta-project"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Kunde</label>
-                <Input
-                  placeholder="Kunde / oppdragsgiver"
-                  value={meetingMeta.client || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, client: e.target.value }))}
-                  data-testid="input-meta-client"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Dato</label>
-                <Input
-                  type="date"
-                  value={meetingMeta.date || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, date: e.target.value }))}
-                  data-testid="input-meta-date"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Tid</label>
-                <Input
-                  type="time"
-                  value={meetingMeta.time || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, time: e.target.value }))}
-                  data-testid="input-meta-time"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Sted</label>
-                <Input
-                  placeholder="F.eks. Byggeplass, Teams"
-                  value={meetingMeta.location || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, location: e.target.value }))}
-                  data-testid="input-meta-location"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Møteleder</label>
-                <Input
-                  placeholder="Navn"
-                  value={meetingMeta.meetingLeader || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, meetingLeader: e.target.value }))}
-                  data-testid="input-meta-leader"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Referent</label>
-                <Input
-                  placeholder="Navn (valgfritt)"
-                  value={meetingMeta.secretary || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, secretary: e.target.value }))}
-                  data-testid="input-meta-secretary"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Deltakere</label>
-                <Input
-                  placeholder="Navn, kommaseparert"
-                  value={meetingMeta.participants || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, participants: e.target.value }))}
-                  data-testid="input-meta-participants"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Fraværende</label>
-                <Input
-                  placeholder="Navn, kommaseparert"
-                  value={meetingMeta.absent || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, absent: e.target.value }))}
-                  data-testid="input-meta-absent"
-                  className="h-8 text-sm"
-                />
-              </div>
+            ))}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Dato</label>
+              <Input
+                type="date"
+                value={meetingMeta.date || ""}
+                onChange={e => setMeetingMeta(prev => ({ ...prev, date: e.target.value }))}
+                className="h-9 text-sm bg-card [color-scheme:light] dark:[color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Tid</label>
+              <Input
+                type="time"
+                value={meetingMeta.time || ""}
+                onChange={e => setMeetingMeta(prev => ({ ...prev, time: e.target.value }))}
+                className="h-9 text-sm bg-card [color-scheme:light] dark:[color-scheme:dark]"
+              />
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* Error message */}
-      {microphoneError && (
-        <div className="mx-3 mt-3 sm:mx-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-3">
-          <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
+      {/* Microphone error banner */}
+      {microphoneError ? (
+        <div className="shrink-0 mx-4 sm:mx-6 mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 flex items-center gap-3">
+          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
           <p className="text-sm text-destructive">{microphoneError}</p>
         </div>
-      )}
+      ) : null}
 
-      {/* Mobile split view - transcript on top, questions below */}
-      <div className="flex-1 lg:hidden flex flex-col p-3 gap-3 overflow-hidden">
-        {/* Transcript section - takes 55% of height */}
-        <Card className="flex-[55] min-h-0 flex flex-col">
-          <CardHeader className="py-2 px-3 border-b flex flex-row items-center justify-between gap-2 flex-shrink-0">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <FileText className="h-4 w-4" />
+      {/* Mobile workspace tab toggle */}
+      <div className="lg:hidden shrink-0 border-b border-border px-3 pt-2">
+        <Tabs
+          value={mobileWorkspaceTab}
+          onValueChange={(v) => setMobileWorkspaceTab(v as "transcript" | "ai")}
+        >
+          <TabsList className="grid grid-cols-2 w-full">
+            <TabsTrigger value="transcript" className="gap-2">
+              <FileText className="h-3.5 w-3.5" />
               Transkript
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {transcriptionEngine && (
-                <Badge
-                  variant="outline"
-                  className={`text-xs font-medium ${transcriptionEngine?.startsWith("nb-whisper") ? "border-green-500 text-green-700 dark:text-green-400" : "border-yellow-500 text-yellow-700 dark:text-yellow-400"}`}
-                  title={transcriptionEngine?.startsWith("nb-whisper") ? `Norsk NbAiLab ${transcriptionEngine}` : "OpenAI Whisper"}
-                >
-                  {transcriptionEngine?.startsWith("nb-whisper") ? "🇳🇴" : "⚡"}
-                </Badge>
-              )}
-              {transcript.length > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {transcript.length}
-                </Badge>
-              )}
-              {transcript.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => cleanTranscriptNow(transcript)}
-                  disabled={isCleaningTranscript}
-                  className="h-7 gap-1 text-xs"
-                  data-testid="button-clean-transcript-mobile"
-                  title={lastTranscriptCleanup
-                    ? `Sist renset ${lastTranscriptCleanup.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}`
-                    : "AI rydder opp transkriberingsfeil basert på kontekst"}
-                >
-                  {isCleaningTranscript
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <Sparkles className="h-3 w-3" />}
-                </Button>
-              )}
-              {transcript.length > 0 && (
-                <Button 
-                  variant={autoScroll ? "default" : "outline"}
-                  size="sm" 
-                  onClick={() => {
-                    if (!autoScroll) {
-                      setAutoScroll(true);
-                      scrollToBottom();
-                    } else {
-                      setAutoScroll(false);
-                    }
-                  }}
-                  className="h-7 gap-1 text-xs"
-                  data-testid="button-auto-scroll-mobile"
-                >
-                  <ArrowDown className="h-3 w-3" />
-                  {autoScroll ? "Auto" : "Scroll"}
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1 p-0 overflow-hidden relative">
-            <div ref={mobileScrollRef} className="h-full">
-              <ScrollArea className="h-full">
-                <div className="p-3 space-y-2" onMouseUp={handleTranscriptMouseUp}>
-                  {transcript.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-center px-4 gap-3">
-                      {isRecording ? (
-                        <>
-                          <div className="flex items-end gap-[3px] h-10">
-                            {audioLevelBars.map((level, i) => (
-                              <div
-                                key={i}
-                                className="w-[5px] rounded-full bg-primary/80 transition-all duration-75"
-                                style={{ height: `${Math.max(4, level * 100)}%` }}
-                              />
-                            ))}
-                          </div>
-                          <p className="text-xs text-muted-foreground">Lytter etter tale...</p>
-                        </>
-                      ) : (
-                        <>
-                          <Mic className="h-8 w-8 text-muted-foreground/50" />
-                          <p className="text-xs text-muted-foreground">Trykk "Start møte" for å begynne</p>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    transcript.map(renderTranscriptSegment)
-                  )}
-                  <div ref={mobileTranscriptEndRef} />
-                </div>
-              </ScrollArea>
-            </div>
-          </CardContent>
-        </Card>
-        
-        {/* Questions section - takes 45% of height */}
-        <Card className="flex-[45] min-h-0 flex flex-col border-2 border-primary/20">
-          <CardHeader className="py-2 px-3 border-b flex flex-row items-center justify-between gap-2 flex-shrink-0">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              Spørsmål
-              {savedQuestions.length > 0 && (
-                <Badge variant="default" className="text-xs">
-                  {savedQuestions.length} lagret
-                </Badge>
-              )}
-            </CardTitle>
-            <Badge variant="outline" className="text-xs">
-              <Brain className="h-3 w-3 mr-1" />
-              {expertRoleLabels[expertRole]}
-            </Badge>
-          </CardHeader>
-          <CardContent className="flex-1 p-0 overflow-hidden">
-            <ScrollArea className="h-full">
-              <div className="p-3 space-y-3">
-                {/* Warnings from rule checking - mobile */}
-                {warnings.length > 0 && (
-                  <div className="space-y-2 pb-2 border-b border-destructive/30">
-                    <div className="flex items-center gap-2 text-destructive text-xs font-medium">
-                      <AlertTriangle className="h-3 w-3" />
-                      Regeladvarsler ({warnings.length})
-                    </div>
-                    {warnings.slice(0, 3).map((warning) => (
-                      <div
-                        key={warning.id}
-                        className={`p-2 rounded-md text-xs ${
-                          warning.level === "violation" 
-                            ? "bg-destructive/10 border border-destructive/30" 
-                            : "bg-orange-500/10 border border-orange-500/30"
-                        }`}
-                        data-testid={`mobile-warning-${warning.id}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <Badge 
-                              variant={warning.level === "violation" ? "destructive" : "outline"}
-                              className="text-[10px] mb-1"
-                            >
-                              {warning.level === "violation" ? "Brudd" : "Risiko"}
-                            </Badge>
-                            <p className="font-medium truncate">{warning.title}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => dismissWarning(warning.id)}
-                            className="h-5 w-5 flex-shrink-0"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    {warnings.length > 3 && (
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        +{warnings.length - 3} flere advarsler
-                      </p>
-                    )}
-                  </div>
-                )}
-                
-                {/* Proposed actions - mobile */}
-                {pendingActions.length > 0 && (
-                  <div className="space-y-2 pb-2 border-b border-blue-300/50">
-                    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 text-xs font-medium">
-                      <ClipboardList className="h-3 w-3" />
-                      Foreslåtte aksjoner ({pendingActions.length})
-                    </div>
-                    {pendingActions.map(action => (
-                      <div key={action.id} className="p-2 rounded-md text-xs bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800" data-testid={`mobile-action-${action.id}`}>
-                        <p className="font-medium mb-1 leading-snug">{action.text}</p>
-                        {(action.suggestedOwner || action.suggestedDeadline) && (
-                          <div className="flex flex-wrap gap-2 mb-1.5 text-muted-foreground">
-                            {action.suggestedOwner && <span className="flex items-center gap-1"><UserCheck className="h-2.5 w-2.5" />{action.suggestedOwner}</span>}
-                            {action.suggestedDeadline && <span className="flex items-center gap-1"><CalendarDays className="h-2.5 w-2.5" />{action.suggestedDeadline}</span>}
-                          </div>
-                        )}
-                        <div className="flex gap-1.5 flex-wrap">
-                          <Button size="sm" variant="outline" onClick={() => startApproval(action)} className="h-6 text-[10px] px-2 gap-1 border-green-500 text-green-700 dark:text-green-400">
-                            <CircleCheck className="h-2.5 w-2.5" /> Godkjenn
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => moveActionToDecision(action.id)} className="h-6 text-[10px] px-2 gap-1 text-purple-700 dark:text-purple-400" data-testid="button-move-to-decision-mobile">
-                            <ArrowRightLeft className="h-2.5 w-2.5" /> Til beslutning
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => rejectAction(action.id)} className="h-6 text-[10px] px-2 gap-1 text-muted-foreground">
-                            <CircleX className="h-2.5 w-2.5" /> Avvis
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Approved actions - mobile */}
-                <div className="space-y-1.5 pb-2 border-b border-green-300/50">
-                    <div className="flex items-center justify-between gap-2 text-green-700 dark:text-green-400 text-xs font-medium">
-                      <span className="flex items-center gap-1.5"><CircleCheck className="h-3 w-3" />Aksjonsliste ({approvedActions.length})</span>
-                      {!showAddAction && <Button variant="ghost" size="sm" onClick={() => setShowAddAction(true)} className="h-5 text-[10px] px-1.5 gap-0.5 text-green-700 dark:text-green-400"><Plus className="h-2.5 w-2.5" />Legg til</Button>}
-                    </div>
-                    {approvedActions.map((action, idx) => (
-                      <div key={action.id} className={`flex items-start gap-1.5 p-1.5 rounded text-xs bg-green-50 dark:bg-green-950/20 border ${action.source === "manual" ? "border-amber-400 dark:border-amber-600" : "border-green-200 dark:border-green-800"}`}>
-                        <span className="font-bold text-green-600 shrink-0">{idx + 1}.</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <p className="leading-snug">{action.text}</p>
-                            {action.source === "manual" && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-700 dark:text-amber-400">Manuelt</Badge>}
-                          </div>
-                          {(action.owner || action.deadline) && (
-                            <div className="flex flex-wrap gap-2 mt-0.5 text-muted-foreground">
-                              {action.owner && <span className="flex items-center gap-1"><UserCheck className="h-2.5 w-2.5" />{action.owner}</span>}
-                              {action.deadline && <span className="flex items-center gap-1"><CalendarDays className="h-2.5 w-2.5" />{formatDeadline(action.deadline)}</span>}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {showAddAction && (
-                      <div className="space-y-1.5 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-md">
-                        <Input placeholder="Aksjonspunkt..." value={addActionText} onChange={e => setAddActionText(e.target.value)} className="h-6 text-xs" onKeyDown={e => e.key === "Enter" && addActionManually()} />
-                        <div className="flex gap-1">
-                          <Input placeholder="Ansvarlig" value={addActionOwner} onChange={e => setAddActionOwner(e.target.value)} className="h-6 text-xs flex-1" />
-                          <Input placeholder="Frist" value={addActionDeadline} onChange={e => setAddActionDeadline(e.target.value)} className="h-6 text-xs flex-1" />
-                        </div>
-                        <div className="flex gap-1">
-                          <Button size="sm" onClick={addActionManually} disabled={!addActionText.trim()} className="h-5 text-[10px] px-2">Legg til</Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setShowAddAction(false); setAddActionText(""); setAddActionOwner(""); setAddActionDeadline(""); }} className="h-5 text-[10px] px-2">Avbryt</Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                {/* Proposed decisions - mobile */}
-                {pendingDecisions.length > 0 && (
-                  <div className="space-y-2 pb-2 border-b border-purple-300/50">
-                    <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 text-xs font-medium">
-                      <Gavel className="h-3 w-3" />
-                      Foreslåtte beslutninger ({pendingDecisions.length})
-                    </div>
-                    {pendingDecisions.map(decision => (
-                      <div key={decision.id} className="p-2 rounded-md text-xs bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800" data-testid={`mobile-decision-${decision.id}`}>
-                        <p className="font-medium mb-1 leading-snug">{decision.text}</p>
-                        {decision.context && <p className="text-muted-foreground italic mb-1.5 text-[10px]">"{decision.context}"</p>}
-                        <div className="flex gap-1.5 flex-wrap">
-                          <Button size="sm" variant="outline" onClick={() => confirmDecision(decision)} className="h-6 text-[10px] px-2 gap-1 border-purple-500 text-purple-700 dark:text-purple-400">
-                            <CircleCheck className="h-2.5 w-2.5" /> Bekreft
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => moveDecisionToAction(decision.id)} className="h-6 text-[10px] px-2 gap-1 text-green-700 dark:text-green-400" data-testid="button-move-to-action-mobile">
-                            <ArrowRightLeft className="h-2.5 w-2.5" /> Til aksjon
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => rejectDecision(decision.id)} className="h-6 text-[10px] px-2 gap-1 text-muted-foreground">
-                            <CircleX className="h-2.5 w-2.5" /> Avvis
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Confirmed decisions - mobile */}
-                <div className="space-y-1.5 pb-2 border-b border-purple-300/50">
-                  <div className="flex items-center justify-between gap-2 text-purple-700 dark:text-purple-400 text-xs font-medium">
-                    <span className="flex items-center gap-1.5"><Gavel className="h-3 w-3" />Beslutninger ({confirmedDecisions.length})</span>
-                    {!showAddDecision && <Button variant="ghost" size="sm" onClick={() => setShowAddDecision(true)} className="h-5 text-[10px] px-1.5 gap-0.5 text-purple-700 dark:text-purple-400"><Plus className="h-2.5 w-2.5" />Legg til</Button>}
-                  </div>
-                  {confirmedDecisions.map((decision, idx) => (
-                    <div key={decision.id} className={`flex items-start gap-1.5 p-1.5 rounded text-xs bg-purple-50 dark:bg-purple-950/20 border ${decision.source === "manual" ? "border-amber-400 dark:border-amber-600" : "border-purple-200 dark:border-purple-800"}`}>
-                      <span className="font-bold text-purple-600 shrink-0">{idx + 1}.</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <p className="leading-snug">{decision.text}</p>
-                          {decision.source === "manual" && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-700 dark:text-amber-400">Manuelt</Badge>}
-                        </div>
-                        {decision.owner && <p className="text-muted-foreground mt-0.5 text-[10px] flex items-center gap-1"><UserCheck className="h-2.5 w-2.5" />{decision.owner}</p>}
-                        {decision.context && <p className="text-muted-foreground italic mt-0.5 text-[10px]">"{decision.context}"</p>}
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeConfirmedDecision(decision.id)} className="h-4 w-4 flex-shrink-0 opacity-50 hover:opacity-100">
-                        <X className="h-2.5 w-2.5" />
-                      </Button>
-                    </div>
-                  ))}
-                  {showAddDecision && (
-                    <div className="space-y-1.5 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-md">
-                      <Input placeholder="Beslutning..." value={addDecisionText} onChange={e => setAddDecisionText(e.target.value)} className="h-6 text-xs" onKeyDown={e => e.key === "Enter" && addDecisionManually()} />
-                      <Input placeholder="Ansvarlig (valgfritt)" value={addDecisionOwner} onChange={e => setAddDecisionOwner(e.target.value)} className="h-6 text-xs" />
-                      <Input placeholder="Kontekst (valgfritt)" value={addDecisionContext} onChange={e => setAddDecisionContext(e.target.value)} className="h-6 text-xs" />
-                      <div className="flex gap-1">
-                        <Button size="sm" onClick={addDecisionManually} disabled={!addDecisionText.trim()} className="h-5 text-[10px] px-2">Legg til</Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setShowAddDecision(false); setAddDecisionText(""); setAddDecisionContext(""); setAddDecisionOwner(""); }} className="h-5 text-[10px] px-2">Avbryt</Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Saved questions at the top */}
-                {savedQuestions.length > 0 && (
-                  <div className="space-y-2 pb-2 border-b">
-                    {savedQuestions.map(renderSavedQuestion)}
-                  </div>
-                )}
-                
-                {/* Active questions - newest first */}
-                {sortedMinutes.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-4">
-                    {isRecording 
-                      ? "Forslag genereres snart..." 
-                      : "Start møte for forslag"
-                    }
-                  </p>
-                ) : (
-                  sortedMinutes.map((minuteIndex) => (
-                    <div key={minuteIndex} className="space-y-2">
-                      <h3 className="text-xs font-medium text-muted-foreground">
-                        Minutt {minuteIndex}–{minuteIndex + 1}
-                      </h3>
-                      <div className="space-y-2">
-                        {groupedActiveQuestions[minuteIndex].map(renderActiveQuestion)}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="gap-2">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI
+              {(pendingActions.length + pendingDecisions.length + warnings.length) > 0 ? (
+                <span className="rounded-full bg-accent/20 text-accent px-1.5 py-0 text-[10px] font-semibold ml-1">
+                  {pendingActions.length + pendingDecisions.length + warnings.length}
+                </span>
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      {/* Desktop two-column view */}
-      <main className="hidden lg:flex flex-1 max-w-7xl mx-auto w-full px-4 py-4 gap-4 overflow-hidden">
-        {/* Transcript column - scrollable */}
-        <div className="flex-[2] min-w-0 overflow-hidden">
-          <Card className="h-full flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 py-3 px-4 border-b">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Live transkript
-                </CardTitle>
-                <div className="flex items-center gap-2">
-                  {transcriptionEngine && (
-                    <Badge
-                      variant="outline"
-                      className={`text-xs font-medium ${transcriptionEngine?.startsWith("nb-whisper") ? "border-green-500 text-green-700 dark:text-green-400" : "border-yellow-500 text-yellow-700 dark:text-yellow-400"}`}
-                      title={transcriptionEngine?.startsWith("nb-whisper") ? `Bruker norsk NbAiLab ${transcriptionEngine}` : "Bruker OpenAI Whisper"}
-                    >
-                      {transcriptionEngine?.startsWith("nb-whisper") ? `🇳🇴 ${transcriptionEngine}` : "⚡ OpenAI Whisper"}
-                    </Badge>
-                  )}
-                  {transcript.length > 0 && (
-                    <Badge variant="outline" className="text-xs">
-                      {transcript.length} segmenter
-                    </Badge>
-                  )}
-                  {transcript.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => cleanTranscriptNow(transcript)}
-                          disabled={isCleaningTranscript || transcript.length === 0}
-                          className="gap-1"
-                          data-testid="button-clean-transcript-desktop"
-                        >
-                          {isCleaningTranscript
-                            ? <Loader2 className="h-3 w-3 animate-spin" />
-                            : <Sparkles className="h-3 w-3" />}
-                          {isCleaningTranscript ? "Renser..." : "Rens tekst"}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {lastTranscriptCleanup
-                          ? `AI-opprydding: sist kjørt ${lastTranscriptCleanup.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })} — skjer automatisk hvert 5. min`
-                          : "AI rydder opp åpenbare transkriberingsfeil basert på kontekst (kjøres automatisk hvert 5. min)"}
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {transcript.length > 0 && (
-                    <Button 
-                      variant={autoScroll ? "default" : "outline"}
-                      size="sm" 
-                      onClick={() => {
-                        if (!autoScroll) {
-                          setAutoScroll(true);
-                          scrollToBottom();
-                        } else {
-                          setAutoScroll(false);
-                        }
-                      }}
-                      className="gap-1"
-                      data-testid="button-auto-scroll-desktop"
-                    >
-                      <ArrowDown className="h-3 w-3" />
-                      {autoScroll ? "Auto-scroll" : "Scroll manuelt"}
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 p-0 overflow-hidden">
-                <div ref={desktopScrollRef} className="h-full">
-                  <ScrollArea className="h-full">
-                    <div className="p-4 space-y-3" onMouseUp={handleTranscriptMouseUp}>
-                      {transcript.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-center gap-4">
-                          {isRecording ? (
-                            <>
-                              <div className="flex items-end gap-[4px] h-16 px-2">
-                                {audioLevelBars.map((level, i) => (
-                                  <div
-                                    key={i}
-                                    className="w-[7px] rounded-full bg-primary/80 transition-all duration-75"
-                                    style={{ height: `${Math.max(5, level * 100)}%` }}
-                                  />
-                                ))}
-                              </div>
-                              <p className="text-muted-foreground italic">Lytter etter tale...</p>
-                            </>
-                          ) : (
-                            <div className="flex flex-col items-center gap-6 max-w-md">
-                              <div className="rounded-full bg-primary/10 p-5">
-                                <Mic className="h-10 w-10 text-primary" />
-                              </div>
-                              <div className="text-center space-y-1">
-                                <h3 className="text-base font-semibold">Klar til å starte møtet</h3>
-                                <p className="text-sm text-muted-foreground">
-                                  Følg disse stegene for å komme i gang
-                                </p>
-                              </div>
-                              <ol className="w-full space-y-3 text-sm">
-                                <li className="flex items-start gap-3">
-                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">1</span>
-                                  <div>
-                                    <div className="font-medium">Velg ekspertrolle</div>
-                                    <div className="text-muted-foreground text-xs">
-                                      Du har valgt: <span className="font-medium text-foreground">{expertRoleLabels[expertRole]}</span>
-                                    </div>
-                                  </div>
-                                </li>
-                                <li className="flex items-start gap-3">
-                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">2</span>
-                                  <div>
-                                    <div className="font-medium">Trykk på <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-medium">🎤 Start møte</kbd></div>
-                                    <div className="text-muted-foreground text-xs">Tillat mikrofontilgang når nettleseren spør</div>
-                                  </div>
-                                </li>
-                                <li className="flex items-start gap-3">
-                                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">3</span>
-                                  <div>
-                                    <div className="font-medium">AI lytter og foreslår spørsmål</div>
-                                    <div className="text-muted-foreground text-xs">
-                                      Hvert minutt får du 3 oppfølgingsspørsmål basert på samtalen
-                                    </div>
-                                  </div>
-                                </li>
-                              </ol>
-                              <p className="text-xs text-muted-foreground text-center">
-                                Tips: Bruk <span className="font-medium">Verktøy</span>-menyen for å laste opp regeldokumenter eller endre intervall.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        transcript.map(renderTranscriptSegment)
-                      )}
-                      <div ref={desktopTranscriptEndRef} />
-                    </div>
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
+      {/* Main work area */}
+      <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(0,42%)_minmax(0,58%)] overflow-hidden">
+        <div className={"min-h-0 flex flex-col " + (mobileWorkspaceTab === "transcript" ? "" : "hidden lg:flex")}>
+          <LiveTranscript
+            ref={desktopScrollRef}
+            segments={transcript}
+            isRecording={isRecording}
+            isCleaning={isCleaningTranscript}
+            audioLevels={audioLevelBars}
+            onCleanTranscript={() => cleanTranscriptNow(transcript)}
+            onSelectionChange={handleTranscriptMouseUp}
+            endRef={desktopTranscriptEndRef}
+          />
         </div>
+        <div className={"min-h-0 flex flex-col " + (mobileWorkspaceTab === "ai" ? "" : "hidden lg:flex")}>
+          <AIWorkbench
+            pendingActions={pendingActions}
+            approvedActions={approvedActions}
+            pendingDecisions={pendingDecisions}
+            confirmedDecisions={confirmedDecisions}
+            savedQuestions={savedQuestions}
+            groupedActiveQuestions={groupedActiveQuestions}
+            sortedMinutes={sortedMinutes}
+            warnings={warnings}
+            isRecording={isRecording}
+            expertRole={expertRole}
+            onApproveAction={inlineApproveAction}
+            onRejectAction={rejectAction}
+            onMoveActionToDecision={moveActionToDecision}
+            onRemoveApprovedAction={removeApprovedAction}
+            onAddActionManually={inlineAddAction}
+            onConfirmDecision={inlineConfirmDecision}
+            onRejectDecision={rejectDecision}
+            onMoveDecisionToAction={moveDecisionToAction}
+            onRemoveConfirmedDecision={removeConfirmedDecision}
+            onAddDecisionManually={inlineAddDecision}
+            onSaveQuestion={handleSaveQuestion}
+            onDeleteQuestion={handleDeleteQuestion}
+            onEditQuestion={handleEditQuestion}
+            onRemoveSavedQuestion={handleRemoveSavedQuestion}
+            onDismissWarning={dismissWarning}
+            className="h-full"
+          />
+        </div>
+      </div>
 
-        {/* Right side — 2-column panel */}
-        <div className="flex-[2] min-w-0 flex flex-col gap-3 overflow-y-auto">
-            {/* Warnings from rule checking */}
-            {warnings.length > 0 && (
-              <Card className="border-2 border-destructive/40 bg-destructive/5">
-                <CardHeader className="py-3 px-4">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    Regeladvarsler
-                    <Badge variant="destructive" className="text-xs">
-                      {warnings.length}
-                    </Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 pt-0">
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {warnings.map((warning) => (
-                      <div
-                        key={warning.id}
-                        className={`p-3 rounded-md border ${
-                          warning.level === "violation" 
-                            ? "border-destructive/50 bg-destructive/10" 
-                            : "border-orange-500/50 bg-orange-500/10"
-                        }`}
-                        data-testid={`warning-${warning.id}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge 
-                                variant={warning.level === "violation" ? "destructive" : "outline"}
-                                className="text-xs"
-                              >
-                                {warning.level === "violation" ? "Brudd" : "Risiko"}
-                              </Badge>
-                              <span className="text-sm font-medium truncate">
-                                {warning.title}
-                              </span>
-                            </div>
-                            
-                            <button
-                              onClick={() => toggleWarningExpanded(warning.id)}
-                              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-                              data-testid={`toggle-warning-${warning.id}`}
-                            >
-                              {expandedWarnings.has(warning.id) ? (
-                                <>
-                                  <ChevronUp className="h-3 w-3" />
-                                  Skjul detaljer
-                                </>
-                              ) : (
-                                <>
-                                  <ChevronDown className="h-3 w-3" />
-                                  Vis detaljer
-                                </>
-                              )}
-                            </button>
-                            
-                            {expandedWarnings.has(warning.id) && (
-                              <div className="mt-2 space-y-2 text-xs">
-                                <div>
-                                  <span className="text-muted-foreground">Forklaring: </span>
-                                  <span>{warning.explanation}</span>
-                                </div>
-                                {warning.transcript_snippet && (
-                                  <div>
-                                    <span className="text-muted-foreground">Fra samtalen: </span>
-                                    <span className="italic">"{warning.transcript_snippet}"</span>
-                                  </div>
-                                )}
-                                {warning.rule_reference && (
-                                  <div className="p-2 rounded bg-muted/50 mt-2">
-                                    <div className="font-medium mb-1">
-                                      {warning.rule_reference.document_name} - {warning.rule_reference.section}
-                                    </div>
-                                    <div className="text-muted-foreground">
-                                      {warning.rule_reference.summary}
-                                    </div>
-                                  </div>
-                                )}
-                                {warning.suggested_questions && warning.suggested_questions.length > 0 && (
-                                  <div className="mt-2">
-                                    <span className="text-muted-foreground font-medium">Foreslåtte oppfølgingsspørsmål:</span>
-                                    <ul className="list-disc list-inside mt-1 space-y-1">
-                                      {warning.suggested_questions.map((q, idx) => (
-                                        <li key={idx}>{q}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => dismissWarning(warning.id)}
-                            className="h-6 w-6 flex-shrink-0"
-                            data-testid={`dismiss-warning-${warning.id}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* 2-column grid for boxes */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Column 1 (visually right): Actions + Decisions */}
-              <div className="flex flex-col gap-3 min-h-0 order-2">
-
-            {/* Action items — always visible */}
-            <Card className="border-2 border-blue-500/30 bg-blue-500/5">
-              <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-blue-700 dark:text-blue-400">
-                  <ClipboardList className="h-4 w-4" />
-                  Aksjonspunkter
-                  {proposedActions.length > 0 && (
-                    <Badge variant="outline" className="text-xs border-blue-400 text-blue-700 dark:text-blue-400">
-                      {pendingActions.length} til vurdering · {approvedActions.length} godkjent
-                    </Badge>
-                  )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                {proposedActions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">
-                    AI-en foreslår aksjonspunkter automatisk under møtet når den oppdager konkrete oppgaver, ansvar eller beslutninger i samtalen.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {/* Pending actions */}
-                    {pendingActions.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">Til vurdering</p>
-                        <div className="space-y-2 max-h-56 overflow-y-auto">
-                          {pendingActions.map(action => (
-                            <div key={action.id} className="p-3 rounded-md border border-blue-200 dark:border-blue-800 bg-white dark:bg-blue-950/30" data-testid={`action-${action.id}`}>
-                              <p className="text-sm font-medium mb-2 leading-snug">{action.text}</p>
-                              {(action.suggestedOwner || action.suggestedDeadline) && (
-                                <div className="flex flex-wrap gap-2 mb-2">
-                                  {action.suggestedOwner && (
-                                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                      <UserCheck className="h-3 w-3" />
-                                      {action.suggestedOwner}
-                                    </span>
-                                  )}
-                                  {action.suggestedDeadline && (
-                                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                      <CalendarDays className="h-3 w-3" />
-                                      {action.suggestedDeadline}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <div className="flex gap-2 flex-wrap">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => startApproval(action)}
-                                  className="h-7 text-xs gap-1 border-green-500 text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/30"
-                                  data-testid={`approve-action-${action.id}`}
-                                >
-                                  <CircleCheck className="h-3 w-3" />
-                                  Godkjenn
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => moveActionToDecision(action.id)}
-                                  className="h-7 text-xs gap-1 text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30"
-                                  data-testid={`move-action-to-decision-${action.id}`}
-                                  title="Flytt til beslutninger"
-                                >
-                                  <ArrowRightLeft className="h-3 w-3" />
-                                  Til beslutning
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => rejectAction(action.id)}
-                                  className="h-7 text-xs gap-1 text-muted-foreground hover:text-destructive"
-                                  data-testid={`reject-action-${action.id}`}
-                                >
-                                  <CircleX className="h-3 w-3" />
-                                  Avvis
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {/* Approved actions */}
-                    {approvedActions.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600 dark:text-green-400">Godkjent</p>
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                          {approvedActions.map((action, idx) => (
-                            <div key={action.id} className={`flex items-start gap-2 p-2 rounded-md border bg-white dark:bg-green-950/20 ${action.source === "manual" ? "border-amber-400 dark:border-amber-600" : "border-green-200 dark:border-green-800"}`} data-testid={`approved-action-${action.id}`}>
-                              <span className="text-xs font-bold text-green-600 mt-0.5 shrink-0">{idx + 1}.</span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1 flex-wrap">
-                                  <p className="text-xs leading-snug">{action.text}</p>
-                                  {action.source === "manual" && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-700 dark:text-amber-400 shrink-0">Manuelt</Badge>}
-                                </div>
-                                {(action.owner || action.deadline) && (
-                                  <div className="flex flex-wrap gap-2 mt-1">
-                                    {action.owner && (
-                                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                        <UserCheck className="h-2.5 w-2.5" />{action.owner}
-                                      </span>
-                                    )}
-                                    {action.deadline && (
-                                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                        <CalendarDays className="h-2.5 w-2.5" />{formatDeadline(action.deadline)}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => removeApprovedAction(action.id)}
-                                className="h-5 w-5 flex-shrink-0 text-muted-foreground hover:text-destructive"
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Manual add action */}
-                <div className="pt-2 border-t border-green-200/50">
-                  {showAddAction ? (
-                    <div className="space-y-2 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-md">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 flex items-center gap-1"><PenLine className="h-3 w-3" />Legg til manuelt</p>
-                      <Input
-                        placeholder="Beskriv aksjonspunktet..."
-                        value={addActionText}
-                        onChange={e => setAddActionText(e.target.value)}
-                        className="h-7 text-xs"
-                        data-testid="input-manual-action-text"
-                        onKeyDown={e => e.key === "Enter" && addActionManually()}
-                      />
-                      <div className="flex gap-1.5">
-                        <Input
-                          placeholder="Ansvarlig (valgfritt)"
-                          value={addActionOwner}
-                          onChange={e => setAddActionOwner(e.target.value)}
-                          className="h-7 text-xs flex-1"
-                        />
-                        <input
-                          type="date"
-                          value={addActionDeadline}
-                          onChange={e => setAddActionDeadline(e.target.value)}
-                          className="h-7 text-xs flex-1 rounded-md border border-input bg-background px-2 text-foreground [color-scheme:light] dark:[color-scheme:dark]"
-                          data-testid="input-manual-action-deadline"
-                        />
-                      </div>
-                      <div className="flex gap-1.5">
-                        <Button size="sm" onClick={addActionManually} disabled={!addActionText.trim()} className="h-6 text-[10px] px-2" data-testid="button-confirm-manual-action">Legg til</Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setShowAddAction(false); setAddActionText(""); setAddActionOwner(""); setAddActionDeadline(""); }} className="h-6 text-[10px] px-2">Avbryt</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowAddAction(true)}
-                      className="h-6 text-[10px] gap-1 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/20 w-full"
-                      data-testid="button-add-manual-action"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Legg til manuelt
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Decisions card — always visible */}
-            <Card className="border-2 border-purple-500/30 bg-purple-500/5">
-              <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-purple-700 dark:text-purple-400">
-                  <Gavel className="h-4 w-4" />
-                  Beslutninger
-                  {proposedDecisions.length > 0 && (
-                    <Badge variant="outline" className="text-xs border-purple-400 text-purple-700 dark:text-purple-400">
-                      {pendingDecisions.length} til vurdering · {confirmedDecisions.length} bekreftet
-                    </Badge>
-                  )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                {proposedDecisions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">
-                    AI-en oppdager beslutninger som tas under møtet og foreslår dem for bekreftelse. Bekreftede beslutninger tas med i referatet.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {/* Pending decisions */}
-                    {pendingDecisions.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-600 dark:text-purple-400">Til vurdering</p>
-                        <div className="space-y-2 max-h-56 overflow-y-auto">
-                          {pendingDecisions.map(decision => (
-                            <div key={decision.id} className="p-3 rounded-md border border-purple-200 dark:border-purple-800 bg-white dark:bg-purple-950/30" data-testid={`decision-${decision.id}`}>
-                              <p className="text-sm font-medium mb-1 leading-snug">{decision.text}</p>
-                              {decision.context && <p className="text-xs text-muted-foreground italic mb-2">"{decision.context}"</p>}
-                              <div className="flex gap-2 flex-wrap">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => confirmDecision(decision)}
-                                  className="h-7 text-xs gap-1 border-purple-500 text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-950/30"
-                                  data-testid={`confirm-decision-${decision.id}`}
-                                >
-                                  <CircleCheck className="h-3 w-3" />
-                                  Bekreft
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => moveDecisionToAction(decision.id)}
-                                  className="h-7 text-xs gap-1 text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/30"
-                                  data-testid={`move-decision-to-action-${decision.id}`}
-                                  title="Flytt til aksjonspunkter"
-                                >
-                                  <ArrowRightLeft className="h-3 w-3" />
-                                  Til aksjon
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => rejectDecision(decision.id)}
-                                  className="h-7 text-xs gap-1 text-muted-foreground hover:text-destructive"
-                                  data-testid={`reject-decision-${decision.id}`}
-                                >
-                                  <CircleX className="h-3 w-3" />
-                                  Avvis
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {/* Confirmed decisions */}
-                    {confirmedDecisions.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-600 dark:text-purple-400">Bekreftet</p>
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                          {confirmedDecisions.map((decision, idx) => (
-                            <div key={decision.id} className={`flex items-start gap-2 p-2 rounded-md border bg-white dark:bg-purple-950/20 ${decision.source === "manual" ? "border-amber-400 dark:border-amber-600" : "border-purple-200 dark:border-purple-800"}`} data-testid={`confirmed-decision-${decision.id}`}>
-                              <span className="text-xs font-bold text-purple-600 mt-0.5 shrink-0">{idx + 1}.</span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1 flex-wrap">
-                                  <p className="text-xs leading-snug">{decision.text}</p>
-                                  {decision.source === "manual" && <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-400 text-amber-700 dark:text-amber-400 shrink-0">Manuelt</Badge>}
-                                </div>
-                                {decision.owner && <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1"><UserCheck className="h-2.5 w-2.5" />{decision.owner}</p>}
-                                {decision.context && <p className="text-[10px] text-muted-foreground italic mt-0.5">"{decision.context}"</p>}
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => removeConfirmedDecision(decision.id)}
-                                className="h-5 w-5 flex-shrink-0 text-muted-foreground hover:text-destructive"
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Manual add decision */}
-                <div className="pt-2 border-t border-purple-200/50">
-                  {showAddDecision ? (
-                    <div className="space-y-2 p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 rounded-md">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 flex items-center gap-1"><PenLine className="h-3 w-3" />Legg til beslutning manuelt</p>
-                      <Input
-                        placeholder="Beskriv beslutningen..."
-                        value={addDecisionText}
-                        onChange={e => setAddDecisionText(e.target.value)}
-                        className="h-7 text-xs"
-                        data-testid="input-manual-decision-text"
-                        onKeyDown={e => e.key === "Enter" && addDecisionManually()}
-                      />
-                      <Input
-                        placeholder="Ansvarlig (valgfritt)"
-                        value={addDecisionOwner}
-                        onChange={e => setAddDecisionOwner(e.target.value)}
-                        className="h-7 text-xs"
-                        data-testid="input-manual-decision-owner"
-                      />
-                      <Input
-                        placeholder="Kontekst / sitat (valgfritt)"
-                        value={addDecisionContext}
-                        onChange={e => setAddDecisionContext(e.target.value)}
-                        className="h-7 text-xs"
-                      />
-                      <div className="flex gap-1.5">
-                        <Button size="sm" onClick={addDecisionManually} disabled={!addDecisionText.trim()} className="h-6 text-[10px] px-2" data-testid="button-confirm-manual-decision">Legg til</Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setShowAddDecision(false); setAddDecisionText(""); setAddDecisionContext(""); setAddDecisionOwner(""); }} className="h-6 text-[10px] px-2">Avbryt</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowAddDecision(true)}
-                      className="h-6 text-[10px] gap-1 text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/20 w-full"
-                      data-testid="button-add-manual-decision"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Legg til beslutning manuelt
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-              </div>{/* end column 1 */}
-
-              {/* Column 2 (visually left): Saved questions + Suggestions */}
-              <div className="flex flex-col gap-3 min-h-0 order-1">
-
-            {/* Saved questions */}
-            <Card className="border-2 border-primary/20">
-              <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Check className="h-4 w-4 text-primary" />
-                  Lagrede spørsmål
-                  {savedQuestions.length > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {savedQuestions.length}
-                    </Badge>
-                  )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                {savedQuestions.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic">
-                    Ingen spørsmål lagret ennå
-                  </p>
-                ) : (
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {savedQuestions.map(renderSavedQuestion)}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Active questions */}
-            <Card className="flex-1">
-              <CardHeader className="py-3 px-4">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-sm font-semibold">Forslag</CardTitle>
-                  <Badge variant="outline" className="text-xs">
-                    <Brain className="h-3 w-3 mr-1" />
-                    {expertRoleLabels[expertRole]}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="max-h-[45vh] overflow-y-auto overscroll-contain">
-                  <div className="p-4 space-y-4">
-                    {sortedMinutes.length === 0 ? (
-                      <p className="text-sm text-muted-foreground italic text-center py-8">
-                        {isRecording 
-                          ? "Spørsmålsforslag genereres etter hvert minutt..." 
-                          : "Start et møte for å få spørsmålsforslag"
-                        }
-                      </p>
-                    ) : (
-                      sortedMinutes.map((minuteIndex) => (
-                        <div key={minuteIndex} className="space-y-2">
-                          <h3 className="text-xs font-medium text-muted-foreground">
-                            Minutt {minuteIndex}–{minuteIndex + 1}
-                          </h3>
-                          <div className="space-y-2">
-                            {groupedActiveQuestions[minuteIndex].map(renderActiveQuestion)}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-              </div>{/* end column 2 */}
-            </div>{/* end 2-col grid */}
-        </div>{/* end right panel */}
-      </main>
+      <MeetingBottombar
+        isRecording={isRecording}
+        isStartingRecording={isStartingRecording}
+        onToggleRecording={() => isRecording ? stopRecording() : startRecording()}
+        expertRole={expertRole}
+        onExpertRoleChange={setExpertRole}
+        questionInterval={questionInterval}
+        onQuestionIntervalChange={setQuestionInterval}
+        transcriptionModel={transcriptionModel}
+        onTranscriptionModelChange={setTranscriptionModel}
+        audioLevels={audioLevelBars}
+      />
 
       <Dialog open={!!editingQuestion} onOpenChange={() => setEditingQuestion(null)}>
         <DialogContent>
@@ -5093,126 +3512,6 @@ export default function MeetingPage() {
               Lagre navn
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Action item approval dialog */}
-      <Dialog open={!!approvingAction} onOpenChange={(open) => { if (!open) { setApprovingAction(null); setApprovalText(""); setApprovalOwner(""); setApprovalDeadline(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CircleCheck className="h-5 w-5 text-green-600" />
-              Godkjenn aksjonspunkt
-            </DialogTitle>
-          </DialogHeader>
-          {approvingAction && (
-            <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Tekst (kan redigeres)</label>
-                <Textarea
-                  value={approvalText}
-                  onChange={e => setApprovalText(e.target.value)}
-                  className="text-sm min-h-[60px] resize-none"
-                  data-testid="approval-text-input"
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium flex items-center gap-1.5">
-                    <UserCheck className="h-3.5 w-3.5" />
-                    Ansvarlig person
-                  </label>
-                  <Input
-                    placeholder={approvingAction.suggestedOwner || "Navn eller rolle..."}
-                    value={approvalOwner}
-                    onChange={e => setApprovalOwner(e.target.value)}
-                    data-testid="approval-owner-input"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium flex items-center gap-1.5">
-                    <CalendarDays className="h-3.5 w-3.5" />
-                    Frist
-                  </label>
-                  <input
-                    type="date"
-                    value={approvalDeadline}
-                    onChange={e => setApprovalDeadline(e.target.value)}
-                    data-testid="approval-deadline-input"
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground [color-scheme:light] dark:[color-scheme:dark]"
-                  />
-                  {approvingAction.suggestedDeadline && !/^\d{4}-\d{2}-\d{2}$/.test(approvingAction.suggestedDeadline) && (
-                    <p className="text-xs text-muted-foreground mt-1">AI foreslo: «{approvingAction.suggestedDeadline}»</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2 pt-1">
-                <Button
-                  onClick={approveAction}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                  data-testid="confirm-approve-action"
-                >
-                  <CircleCheck className="h-4 w-4 mr-2" />
-                  Godkjenn og lagre
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => { setApprovingAction(null); setApprovalText(""); setApprovalOwner(""); setApprovalDeadline(""); }}
-                >
-                  Avbryt
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Decision confirmation dialog */}
-      <Dialog open={!!confirmingDecision} onOpenChange={(open) => { if (!open) { setConfirmingDecision(null); setConfirmingDecisionText(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Gavel className="h-5 w-5 text-purple-600" />
-              Bekreft beslutning
-            </DialogTitle>
-          </DialogHeader>
-          {confirmingDecision && (
-            <div className="space-y-4 py-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Tekst (kan redigeres)</label>
-                <Textarea
-                  value={confirmingDecisionText}
-                  onChange={e => setConfirmingDecisionText(e.target.value)}
-                  className="text-sm min-h-[60px] resize-none"
-                  data-testid="confirm-decision-text-input"
-                />
-              </div>
-              {confirmingDecision.context && (
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Kontekst fra møtet</label>
-                  <div className="p-2 rounded-md bg-muted text-xs text-muted-foreground italic leading-snug">
-                    «{confirmingDecision.context}»
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-2 pt-1">
-                <Button
-                  onClick={doConfirmDecision}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
-                  data-testid="confirm-decision-button"
-                >
-                  <CircleCheck className="h-4 w-4 mr-2" />
-                  Bekreft og lagre
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => { setConfirmingDecision(null); setConfirmingDecisionText(""); }}
-                >
-                  Avbryt
-                </Button>
-              </div>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 

@@ -447,3 +447,60 @@ tid på utenfor selve møtene — er fullstendig redesignet.
   flyter automatisk gjennom hundrevis av eksisterende komponenter — null
   refaktor av forbruker-koden trengs.
 
+---
+
+## Runde 2 — Møteside-refaktor (etter brukerens "gjør alt"-mandat)
+
+### Hva ble levert
+
+**Nye møteside-komponenter** i `client/src/components/meeting/`:
+- `ActionCard` — proposed-tilstand ekspanderer **inline** med tekst/eier/
+  frist-felter; godkjent-tilstand viser nummerert kort med eier/frist.
+  Tastatursnarveier: ⌘ Enter godkjenn, Esc lukk.
+- `DecisionCard` — samme inline-mønster for beslutninger.
+- `WarningCard` — regelbrudd med utvidbar detalj-visning og kontekst.
+- `QuestionCard` — kombinert active/saved-question-rendering.
+- `ManualAddInline` — ekspanderbar "legg til manuelt"-knapp for både
+  aksjoner og beslutninger.
+- `AIWorkbench` — tabs (Aksjoner, Beslutninger, Spørsmål, Advarsler) med
+  badge-tellere og pulse-animasjon på advarsler. Empty states i hver tab.
+- `LiveTranscript` — transkript-panel med audio-level-visualisering når
+  ingen tale, "rens"-knapp, og førstegangs-tooltip ved første opptak.
+- `MeetingTopbar` — slank topbar med inline-tittel-input, timer,
+  "Tar opp"-pille, "Lag referat"-CTA og kebab-meny for sjeldne handlinger.
+- `MeetingBottombar` — sticky bunnbar med stor RecordButton (pulserende
+  korall ved opptak), audio-level-bars, og kompakte selectors for
+  ekspertrolle/intervall/transkripsjonsmodell.
+
+**Inline approve/confirm-flyt** i `meeting.tsx`:
+- Lagt til `inlineApproveAction(id, edits)`, `inlineConfirmDecision(id,
+  edits)`, `inlineAddAction`, `inlineAddDecision` — bypass av modal-flyten.
+- Slettet de gamle approval- og confirmation-modalene (2 dialoger).
+- Tastatursnarveier i ActionCard/DecisionCard: ⌘ Enter / Esc.
+
+**Onboarding-tooltips på møtesiden**:
+- `firstRecording` i LiveTranscript når opptak starter første gang.
+- `firstProposal` i AIWorkbench actions-tab når første proposed-action
+  vises.
+
+**Stor opprydning av meeting.tsx**:
+- Slettet 1420 linjer JSX (gammelt header + mobil + desktop layout).
+- Slettet 437 linjer dead code (`settingsContent`, gamle render-funksjoner).
+- Fra 5949 linjer → 4238 linjer (-29%).
+
+### Verifisering
+
+- ✓ `npm run check`: Kun 2 gjenværende pre-eksisterende feil i
+  SummaryWysiwygEditor (turndown-plugin-gfm types og setContent options).
+  Den tredje pre-eksisterende feilen i meeting.tsx er nå løst som
+  bonus-effekt (lå inni dead `settingsContent`-blokken).
+- ✓ `npm run build`: 2221 moduler transformert, vellykket.
+- ✓ Lydopptak-pipeline urørt (AudioContext + WAV hvert 28s).
+- ✓ Auth, schema, API-endepunkter urørt.
+- ✓ Mobile/desktop responsive layout via grid + tab-toggle.
+
+### Tilbakerullingsplan
+
+Hele runde 2 er én commit som kan revertes hvis lydopptak skulle bli
+rammet. Ingen schema-endringer, ingen API-endringer.
+
