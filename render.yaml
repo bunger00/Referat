@@ -1,14 +1,14 @@
 # Render Blueprint for Møtetranskripsjons-appen.
 # Bruker en ekstern Postgres-database (Supabase) — ikke Render-Postgres —
 # slik at databasen overlever når web-tjenesten skaleres ned eller redeployes.
+# Auth håndteres av Supabase Auth (samme prosjekt som DB-en).
 #
 # Slik bruker du den:
 #   1. Push repoet til GitHub (allerede gjort).
 #   2. Gå til https://dashboard.render.com/blueprints og velg "New Blueprint".
 #   3. Pek på dette repoet — Render leser denne fila.
-#   4. I formularet som åpnes, lim inn `DATABASE_URL` fra Supabase
-#      (Connection string → URI, helst Session mode på pooleren) og resten
-#      av nøklene som er markert `sync: false`.
+#   4. I formularet som åpnes, lim inn DATABASE_URL fra Supabase samt
+#      SUPABASE_URL, SUPABASE_JWT_SECRET, og frontend-nøklene.
 
 services:
   - type: web
@@ -27,21 +27,27 @@ services:
       - key: NODE_ENV
         value: production
 
-      # ----- Auto-generert -----
-      - key: SESSION_SECRET
-        generateValue: true     # Render lager en sterk tilfeldig verdi
-
-      # ----- Du må sette disse manuelt i Render dashboard -----
-      # `sync: false` betyr at Render ikke lagrer verdien i denne fila.
+      # ----- Supabase: database -----
       - key: DATABASE_URL
         sync: false             # Supabase URI: postgresql://postgres.<ref>:<pwd>@aws-0-...pooler.supabase.com:5432/postgres
-      - key: APP_PASSWORD_HASH
-        sync: false             # Generer lokalt: `npm run setup`, kopier hashen
+
+      # ----- Supabase Auth: server-side JWT-validering -----
+      - key: SUPABASE_URL
+        sync: false             # https://<project-ref>.supabase.co (Project Settings → API)
+      - key: SUPABASE_JWT_SECRET
+        sync: false             # Project Settings → API → JWT Settings → JWT Secret
+
+      # ----- Supabase Auth: frontend (Vite injecter på build-time) -----
+      - key: VITE_SUPABASE_URL
+        sync: false             # Samme som SUPABASE_URL — Vite trenger VITE_-prefix for å eksponere til klient
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false             # Project Settings → API → anon/public key
+
+      # ----- Andre tjenester -----
       - key: OPENAI_API_KEY
-        sync: false             # Din OpenAI-nøkkel (sk-...)
+        sync: false
 
       # ----- Valgfritt: HuggingFace nb-whisper -----
-      # La være tomme for å bruke OpenAI Whisper som primær transkripsjon.
       - key: HUGGINGFACE_API_KEY
         sync: false
       - key: HF_NB_WHISPER_MEDIUM_URL
@@ -51,4 +57,4 @@ services:
 
       # ----- Valgfritt: Postgres-tuning -----
       - key: DB_POOL_MAX
-        value: "10"             # Supabase nano = 60 totalt, hold appen lav
+        value: "10"

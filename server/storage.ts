@@ -1,155 +1,169 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type TranscriptSegment, type Question, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
+
+// Every per-user method takes userId from the JWT-validated request and
+// scopes the query to that user's rows. There's no "global" scope for owned
+// data — the only way to read another user's data would be to bypass this
+// layer (which the routes are not allowed to do).
 
 export interface IStorage {
   getVoiceProfiles(): Promise<VoiceProfile[]>;
   getVoiceProfile(id: number): Promise<VoiceProfile | undefined>;
   createVoiceProfile(profile: InsertVoiceProfile): Promise<VoiceProfile>;
   deleteVoiceProfile(id: number): Promise<boolean>;
-  
+
   // Meeting sessions
-  getMeetingSessions(): Promise<MeetingSession[]>;
-  getMeetingSession(id: number): Promise<MeetingSession | undefined>;
-  createMeetingSession(session: InsertMeetingSession): Promise<MeetingSession>;
-  updateMeetingSession(id: number, updates: Partial<InsertMeetingSession>): Promise<MeetingSession | undefined>;
-  deleteMeetingSession(id: number): Promise<boolean>;
+  getMeetingSessions(userId: string): Promise<MeetingSession[]>;
+  getMeetingSession(userId: string, id: number): Promise<MeetingSession | undefined>;
+  createMeetingSession(userId: string, session: Omit<InsertMeetingSession, "userId">): Promise<MeetingSession>;
+  updateMeetingSession(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingSession | undefined>;
+  deleteMeetingSession(userId: string, id: number): Promise<boolean>;
 
   // Meeting series
-  getMeetingSeriesList(): Promise<MeetingSeriesRow[]>;
-  getMeetingSeriesById(id: number): Promise<MeetingSeriesRow | undefined>;
-  createMeetingSeries(series: InsertMeetingSeries): Promise<MeetingSeriesRow>;
-  updateMeetingSeries(id: number, updates: Partial<InsertMeetingSeries>): Promise<MeetingSeriesRow | undefined>;
-  updateSeriesNameOnSessions(seriesId: number, newName: string): Promise<void>;
-  deleteMeetingSeries(id: number): Promise<boolean>;
-  getSessionsInSeries(seriesId: number): Promise<MeetingSession[]>;
-  
-  // Meeting documents (knowledge docs scoped to session or series)
-  getMeetingDocuments(sessionId?: number, seriesId?: number): Promise<MeetingDocument[]>;
-  createMeetingDocument(doc: InsertMeetingDocument): Promise<MeetingDocument>;
-  deleteMeetingDocument(id: number): Promise<boolean>;
+  getMeetingSeriesList(userId: string): Promise<MeetingSeriesRow[]>;
+  getMeetingSeriesById(userId: string, id: number): Promise<MeetingSeriesRow | undefined>;
+  createMeetingSeries(userId: string, series: Omit<InsertMeetingSeries, "userId">): Promise<MeetingSeriesRow>;
+  updateMeetingSeries(userId: string, id: number, updates: Partial<Omit<InsertMeetingSeries, "userId">>): Promise<MeetingSeriesRow | undefined>;
+  updateSeriesNameOnSessions(userId: string, seriesId: number, newName: string): Promise<void>;
+  deleteMeetingSeries(userId: string, id: number): Promise<boolean>;
+  getSessionsInSeries(userId: string, seriesId: number): Promise<MeetingSession[]>;
+
+  // Meeting documents
+  getMeetingDocuments(userId: string, sessionId?: number, seriesId?: number): Promise<MeetingDocument[]>;
+  createMeetingDocument(userId: string, doc: Omit<InsertMeetingDocument, "userId">): Promise<MeetingDocument>;
+  deleteMeetingDocument(userId: string, id: number): Promise<boolean>;
 
   // Rules (persistent in database)
-  getRulesState(): Promise<RulesState>;
-  addDocument(document: InsertRuleDocument): Promise<number>;
-  updateDocumentStatus(documentId: number, status: string, rulesExtracted?: number, errorMessage?: string): Promise<void>;
-  addRules(rules: InsertExtractedRule[]): Promise<void>;
-  clearRules(): Promise<void>;
-  removeDocument(documentId: number): Promise<void>;
+  getRulesState(userId: string): Promise<RulesState>;
+  addDocument(userId: string, document: Omit<InsertRuleDocument, "userId">): Promise<number>;
+  updateDocumentStatus(userId: string, documentId: number, status: string, rulesExtracted?: number, errorMessage?: string): Promise<void>;
+  addRules(userId: string, rules: Omit<InsertExtractedRule, "userId">[]): Promise<void>;
+  clearRules(userId: string): Promise<void>;
+  removeDocument(userId: string, documentId: number): Promise<void>;
 
   // Learning / Feedback
-  logFeedback(entry: { type: string; text: string; context?: string; accepted: boolean; expertRole?: string; source?: string }): Promise<void>;
-  getFeedbackLog(): Promise<FeedbackLogEntry[]>;
-  getAiPreferences(): Promise<AiPreferences | null>;
-  setAiPreferences(profileText: string, signalCount: number): Promise<void>;
-  logSummaryFeedback(commentText: string, summaryExcerpt?: string): Promise<void>;
-  getSummaryFeedbackLog(): Promise<SummaryFeedbackEntry[]>;
-  getSummaryPreferences(): Promise<SummaryPreferences | null>;
-  setSummaryPreferences(profileText: string, feedbackCount: number): Promise<void>;
+  logFeedback(userId: string, entry: { type: string; text: string; context?: string; accepted: boolean; reason?: string; expertRole?: string; source?: string }): Promise<void>;
+  getFeedbackLog(userId: string): Promise<FeedbackLogEntry[]>;
+  getAiPreferences(userId: string): Promise<AiPreferences | null>;
+  setAiPreferences(userId: string, profileText: string, signalCount: number): Promise<void>;
+  logSummaryFeedback(userId: string, commentText: string, summaryExcerpt?: string): Promise<void>;
+  getSummaryFeedbackLog(userId: string): Promise<SummaryFeedbackEntry[]>;
+  getSummaryPreferences(userId: string): Promise<SummaryPreferences | null>;
+  setSummaryPreferences(userId: string, profileText: string, feedbackCount: number): Promise<void>;
 
-  // Word corrections (custom vocabulary for transcription)
-  getWordCorrections(): Promise<WordCorrection[]>;
-  upsertWordCorrection(original: string, corrected: string): Promise<WordCorrection>;
-  deleteWordCorrection(id: number): Promise<boolean>;
+  // Word corrections
+  getWordCorrections(userId: string): Promise<WordCorrection[]>;
+  upsertWordCorrection(userId: string, original: string, corrected: string): Promise<WordCorrection>;
+  deleteWordCorrection(userId: string, id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
+  // Voice profiles are not currently surfaced as user data; left global for now.
   async getVoiceProfiles(): Promise<VoiceProfile[]> {
     return await db.select().from(voiceProfiles);
   }
-
   async getVoiceProfile(id: number): Promise<VoiceProfile | undefined> {
     const [profile] = await db.select().from(voiceProfiles).where(eq(voiceProfiles.id, id));
     return profile || undefined;
   }
-
   async createVoiceProfile(insertProfile: InsertVoiceProfile): Promise<VoiceProfile> {
-    const [profile] = await db
-      .insert(voiceProfiles)
-      .values(insertProfile)
-      .returning();
+    const [profile] = await db.insert(voiceProfiles).values(insertProfile).returning();
     return profile;
   }
-
   async deleteVoiceProfile(id: number): Promise<boolean> {
     const result = await db.delete(voiceProfiles).where(eq(voiceProfiles.id, id)).returning();
     return result.length > 0;
   }
 
   // Meeting sessions
-  async getMeetingSessions(): Promise<MeetingSession[]> {
-    return await db.select().from(meetingSessions).orderBy(desc(meetingSessions.startedAt));
+  async getMeetingSessions(userId: string): Promise<MeetingSession[]> {
+    return await db.select().from(meetingSessions)
+      .where(eq(meetingSessions.userId, userId))
+      .orderBy(desc(meetingSessions.startedAt));
   }
 
-  async getMeetingSession(id: number): Promise<MeetingSession | undefined> {
-    const [session] = await db.select().from(meetingSessions).where(eq(meetingSessions.id, id));
+  async getMeetingSession(userId: string, id: number): Promise<MeetingSession | undefined> {
+    const [session] = await db.select().from(meetingSessions)
+      .where(and(eq(meetingSessions.id, id), eq(meetingSessions.userId, userId)));
     return session || undefined;
   }
 
-  async createMeetingSession(insertSession: InsertMeetingSession): Promise<MeetingSession> {
-    const [session] = await db
-      .insert(meetingSessions)
-      .values([insertSession])
+  async createMeetingSession(userId: string, insertSession: Omit<InsertMeetingSession, "userId">): Promise<MeetingSession> {
+    const [session] = await db.insert(meetingSessions)
+      .values([{ ...insertSession, userId } as any])
       .returning();
     return session;
   }
 
-  async updateMeetingSession(id: number, updates: Record<string, unknown>): Promise<MeetingSession | undefined> {
-    const [session] = await db
-      .update(meetingSessions)
+  async updateMeetingSession(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingSession | undefined> {
+    const [session] = await db.update(meetingSessions)
       .set(updates as any)
-      .where(eq(meetingSessions.id, id))
+      .where(and(eq(meetingSessions.id, id), eq(meetingSessions.userId, userId)))
       .returning();
     return session || undefined;
   }
 
-  async deleteMeetingSession(id: number): Promise<boolean> {
-    const result = await db.delete(meetingSessions).where(eq(meetingSessions.id, id)).returning();
+  async deleteMeetingSession(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(meetingSessions)
+      .where(and(eq(meetingSessions.id, id), eq(meetingSessions.userId, userId)))
+      .returning();
     return result.length > 0;
   }
 
   // Meeting series
-  async getMeetingSeriesList(): Promise<MeetingSeriesRow[]> {
-    return await db.select().from(meetingSeries).orderBy(desc(meetingSeries.createdAt));
+  async getMeetingSeriesList(userId: string): Promise<MeetingSeriesRow[]> {
+    return await db.select().from(meetingSeries)
+      .where(eq(meetingSeries.userId, userId))
+      .orderBy(desc(meetingSeries.createdAt));
   }
 
-  async getMeetingSeriesById(id: number): Promise<MeetingSeriesRow | undefined> {
-    const [row] = await db.select().from(meetingSeries).where(eq(meetingSeries.id, id));
+  async getMeetingSeriesById(userId: string, id: number): Promise<MeetingSeriesRow | undefined> {
+    const [row] = await db.select().from(meetingSeries)
+      .where(and(eq(meetingSeries.id, id), eq(meetingSeries.userId, userId)));
     return row || undefined;
   }
 
-  async createMeetingSeries(series: InsertMeetingSeries): Promise<MeetingSeriesRow> {
-    const [row] = await db.insert(meetingSeries).values(series).returning();
+  async createMeetingSeries(userId: string, series: Omit<InsertMeetingSeries, "userId">): Promise<MeetingSeriesRow> {
+    const [row] = await db.insert(meetingSeries).values({ ...series, userId } as any).returning();
     return row;
   }
 
-  async updateMeetingSeries(id: number, updates: Partial<InsertMeetingSeries>): Promise<MeetingSeriesRow | undefined> {
-    const [row] = await db.update(meetingSeries).set(updates).where(eq(meetingSeries.id, id)).returning();
+  async updateMeetingSeries(userId: string, id: number, updates: Partial<Omit<InsertMeetingSeries, "userId">>): Promise<MeetingSeriesRow | undefined> {
+    const [row] = await db.update(meetingSeries)
+      .set(updates as any)
+      .where(and(eq(meetingSeries.id, id), eq(meetingSeries.userId, userId)))
+      .returning();
     return row || undefined;
   }
 
-  async updateSeriesNameOnSessions(seriesId: number, newName: string): Promise<void> {
+  async updateSeriesNameOnSessions(userId: string, seriesId: number, newName: string): Promise<void> {
     await db.update(meetingSessions)
       .set({ seriesName: newName })
-      .where(eq(meetingSessions.seriesId, seriesId));
+      .where(and(eq(meetingSessions.seriesId, seriesId), eq(meetingSessions.userId, userId)));
   }
 
-  async deleteMeetingSeries(id: number): Promise<boolean> {
-    // Unlink sessions first
-    await db.update(meetingSessions).set({ seriesId: null }).where(eq(meetingSessions.seriesId, id));
-    const result = await db.delete(meetingSeries).where(eq(meetingSeries.id, id)).returning();
+  async deleteMeetingSeries(userId: string, id: number): Promise<boolean> {
+    await db.update(meetingSessions)
+      .set({ seriesId: null })
+      .where(and(eq(meetingSessions.seriesId, id), eq(meetingSessions.userId, userId)));
+    const result = await db.delete(meetingSeries)
+      .where(and(eq(meetingSeries.id, id), eq(meetingSeries.userId, userId)))
+      .returning();
     return result.length > 0;
   }
 
-  async getSessionsInSeries(seriesId: number): Promise<MeetingSession[]> {
+  async getSessionsInSeries(userId: string, seriesId: number): Promise<MeetingSession[]> {
     return await db.select().from(meetingSessions)
-      .where(eq(meetingSessions.seriesId, seriesId))
+      .where(and(eq(meetingSessions.seriesId, seriesId), eq(meetingSessions.userId, userId)))
       .orderBy(meetingSessions.startedAt);
   }
 
   // Meeting documents
-  async getMeetingDocuments(sessionId?: number, seriesId?: number): Promise<MeetingDocument[]> {
-    const rows = await db.select().from(meetingDocuments).orderBy(desc(meetingDocuments.createdAt));
+  async getMeetingDocuments(userId: string, sessionId?: number, seriesId?: number): Promise<MeetingDocument[]> {
+    const rows = await db.select().from(meetingDocuments)
+      .where(eq(meetingDocuments.userId, userId))
+      .orderBy(desc(meetingDocuments.createdAt));
     return rows.filter(d => {
       if (sessionId && d.sessionId === sessionId) return true;
       if (seriesId && d.seriesId === seriesId) return true;
@@ -158,21 +172,27 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async createMeetingDocument(doc: InsertMeetingDocument): Promise<MeetingDocument> {
-    const [row] = await db.insert(meetingDocuments).values(doc).returning();
+  async createMeetingDocument(userId: string, doc: Omit<InsertMeetingDocument, "userId">): Promise<MeetingDocument> {
+    const [row] = await db.insert(meetingDocuments).values({ ...doc, userId } as any).returning();
     return row;
   }
 
-  async deleteMeetingDocument(id: number): Promise<boolean> {
-    const result = await db.delete(meetingDocuments).where(eq(meetingDocuments.id, id)).returning();
+  async deleteMeetingDocument(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(meetingDocuments)
+      .where(and(eq(meetingDocuments.id, id), eq(meetingDocuments.userId, userId)))
+      .returning();
     return result.length > 0;
   }
 
-  // Rules management (persistent in database)
-  async getRulesState(): Promise<RulesState> {
-    const docs = await db.select().from(ruleDocuments).orderBy(desc(ruleDocuments.uploadedAt));
-    const rules = await db.select().from(extractedRulesTable).orderBy(extractedRulesTable.createdAt);
-    
+  // Rules
+  async getRulesState(userId: string): Promise<RulesState> {
+    const docs = await db.select().from(ruleDocuments)
+      .where(eq(ruleDocuments.userId, userId))
+      .orderBy(desc(ruleDocuments.uploadedAt));
+    const rules = await db.select().from(extractedRulesTable)
+      .where(eq(extractedRulesTable.userId, userId))
+      .orderBy(extractedRulesTable.createdAt);
+
     const documents: UploadedDocument[] = docs.map(doc => ({
       id: String(doc.id),
       filename: doc.filename,
@@ -184,7 +204,7 @@ export class DatabaseStorage implements IStorage {
       status: doc.status as "processing" | "ready" | "error",
       errorMessage: doc.errorMessage || undefined,
     }));
-    
+
     const extractedRules: ExtractedRule[] = rules.map(rule => ({
       id: rule.externalRuleId,
       document_name: rule.documentName,
@@ -194,7 +214,7 @@ export class DatabaseStorage implements IStorage {
       summary: rule.summary,
       tags: rule.tags || [],
     }));
-    
+
     return {
       documents,
       rules: extractedRules,
@@ -202,35 +222,41 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async addDocument(document: InsertRuleDocument): Promise<number> {
-    const [doc] = await db.insert(ruleDocuments).values(document).returning();
+  async addDocument(userId: string, document: Omit<InsertRuleDocument, "userId">): Promise<number> {
+    const [doc] = await db.insert(ruleDocuments).values({ ...document, userId } as any).returning();
     return doc.id;
   }
 
-  async updateDocumentStatus(documentId: number, status: string, rulesExtracted?: number, errorMessage?: string): Promise<void> {
+  async updateDocumentStatus(userId: string, documentId: number, status: string, rulesExtracted?: number, errorMessage?: string): Promise<void> {
     const updates: Record<string, any> = { status };
     if (rulesExtracted !== undefined) updates.rulesExtracted = rulesExtracted;
     if (errorMessage !== undefined) updates.errorMessage = errorMessage;
-    await db.update(ruleDocuments).set(updates).where(eq(ruleDocuments.id, documentId));
+    await db.update(ruleDocuments).set(updates)
+      .where(and(eq(ruleDocuments.id, documentId), eq(ruleDocuments.userId, userId)));
   }
 
-  async addRules(rules: InsertExtractedRule[]): Promise<void> {
-    if (rules.length > 0) await db.insert(extractedRulesTable).values(rules);
+  async addRules(userId: string, rules: Omit<InsertExtractedRule, "userId">[]): Promise<void> {
+    if (rules.length > 0) {
+      await db.insert(extractedRulesTable).values(rules.map(r => ({ ...r, userId } as any)));
+    }
   }
 
-  async clearRules(): Promise<void> {
-    await db.delete(extractedRulesTable);
-    await db.delete(ruleDocuments);
+  async clearRules(userId: string): Promise<void> {
+    await db.delete(extractedRulesTable).where(eq(extractedRulesTable.userId, userId));
+    await db.delete(ruleDocuments).where(eq(ruleDocuments.userId, userId));
   }
 
-  async removeDocument(documentId: number): Promise<void> {
-    await db.delete(extractedRulesTable).where(eq(extractedRulesTable.documentId, documentId));
-    await db.delete(ruleDocuments).where(eq(ruleDocuments.id, documentId));
+  async removeDocument(userId: string, documentId: number): Promise<void> {
+    await db.delete(extractedRulesTable)
+      .where(and(eq(extractedRulesTable.documentId, documentId), eq(extractedRulesTable.userId, userId)));
+    await db.delete(ruleDocuments)
+      .where(and(eq(ruleDocuments.id, documentId), eq(ruleDocuments.userId, userId)));
   }
 
   // Learning / Feedback
-  async logFeedback(entry: { type: string; text: string; context?: string; accepted: boolean; reason?: string; expertRole?: string; source?: string }): Promise<void> {
+  async logFeedback(userId: string, entry: { type: string; text: string; context?: string; accepted: boolean; reason?: string; expertRole?: string; source?: string }): Promise<void> {
     await db.insert(feedbackLog).values({
+      userId,
       type: entry.type,
       text: entry.text,
       context: entry.context || null,
@@ -241,67 +267,79 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getFeedbackLog(): Promise<FeedbackLogEntry[]> {
-    return await db.select().from(feedbackLog).orderBy(desc(feedbackLog.createdAt));
+  async getFeedbackLog(userId: string): Promise<FeedbackLogEntry[]> {
+    return await db.select().from(feedbackLog)
+      .where(eq(feedbackLog.userId, userId))
+      .orderBy(desc(feedbackLog.createdAt));
   }
 
-  async getAiPreferences(): Promise<AiPreferences | null> {
-    const [row] = await db.select().from(aiPreferences).where(eq(aiPreferences.id, 1));
+  async getAiPreferences(userId: string): Promise<AiPreferences | null> {
+    const [row] = await db.select().from(aiPreferences).where(eq(aiPreferences.userId, userId));
     return row || null;
   }
 
-  async setAiPreferences(profileText: string, signalCount: number): Promise<void> {
-    const existing = await this.getAiPreferences();
+  async setAiPreferences(userId: string, profileText: string, signalCount: number): Promise<void> {
+    const existing = await this.getAiPreferences(userId);
     if (existing) {
-      await db.update(aiPreferences).set({ profileText, signalCount, updatedAt: new Date() }).where(eq(aiPreferences.id, 1));
+      await db.update(aiPreferences)
+        .set({ profileText, signalCount, updatedAt: new Date() })
+        .where(eq(aiPreferences.userId, userId));
     } else {
-      await db.insert(aiPreferences).values({ id: 1, profileText, signalCount });
+      await db.insert(aiPreferences).values({ userId, profileText, signalCount } as any);
     }
   }
 
-  async logSummaryFeedback(commentText: string, summaryExcerpt?: string): Promise<void> {
-    await db.insert(summaryFeedback).values({ commentText, summaryExcerpt: summaryExcerpt || null });
+  async logSummaryFeedback(userId: string, commentText: string, summaryExcerpt?: string): Promise<void> {
+    await db.insert(summaryFeedback).values({ userId, commentText, summaryExcerpt: summaryExcerpt || null });
   }
 
-  async getSummaryFeedbackLog(): Promise<SummaryFeedbackEntry[]> {
-    return await db.select().from(summaryFeedback).orderBy(desc(summaryFeedback.createdAt));
+  async getSummaryFeedbackLog(userId: string): Promise<SummaryFeedbackEntry[]> {
+    return await db.select().from(summaryFeedback)
+      .where(eq(summaryFeedback.userId, userId))
+      .orderBy(desc(summaryFeedback.createdAt));
   }
 
-  async getSummaryPreferences(): Promise<SummaryPreferences | null> {
-    const [row] = await db.select().from(summaryPreferences).where(eq(summaryPreferences.id, 1));
+  async getSummaryPreferences(userId: string): Promise<SummaryPreferences | null> {
+    const [row] = await db.select().from(summaryPreferences).where(eq(summaryPreferences.userId, userId));
     return row || null;
   }
 
-  async setSummaryPreferences(profileText: string, feedbackCount: number): Promise<void> {
-    const existing = await this.getSummaryPreferences();
+  async setSummaryPreferences(userId: string, profileText: string, feedbackCount: number): Promise<void> {
+    const existing = await this.getSummaryPreferences(userId);
     if (existing) {
-      await db.update(summaryPreferences).set({ profileText, feedbackCount, updatedAt: new Date() }).where(eq(summaryPreferences.id, 1));
+      await db.update(summaryPreferences)
+        .set({ profileText, feedbackCount, updatedAt: new Date() })
+        .where(eq(summaryPreferences.userId, userId));
     } else {
-      await db.insert(summaryPreferences).values({ id: 1, profileText, feedbackCount });
+      await db.insert(summaryPreferences).values({ userId, profileText, feedbackCount } as any);
     }
   }
 
   // Word corrections
-  async getWordCorrections(): Promise<WordCorrection[]> {
-    return await db.select().from(wordCorrections).orderBy(wordCorrections.createdAt);
+  async getWordCorrections(userId: string): Promise<WordCorrection[]> {
+    return await db.select().from(wordCorrections)
+      .where(eq(wordCorrections.userId, userId))
+      .orderBy(wordCorrections.createdAt);
   }
 
-  async upsertWordCorrection(original: string, corrected: string): Promise<WordCorrection> {
-    const [existing] = await db.select().from(wordCorrections).where(eq(wordCorrections.original, original));
+  async upsertWordCorrection(userId: string, original: string, corrected: string): Promise<WordCorrection> {
+    const [existing] = await db.select().from(wordCorrections)
+      .where(and(eq(wordCorrections.original, original), eq(wordCorrections.userId, userId)));
     if (existing) {
-      const [updated] = await db
-        .update(wordCorrections)
+      const [updated] = await db.update(wordCorrections)
         .set({ corrected })
-        .where(eq(wordCorrections.id, existing.id))
+        .where(and(eq(wordCorrections.id, existing.id), eq(wordCorrections.userId, userId)))
         .returning();
       return updated;
     }
-    const [row] = await db.insert(wordCorrections).values({ original, corrected }).returning();
+    const [row] = await db.insert(wordCorrections).values({ userId, original, corrected } as any).returning();
     return row;
   }
 
-  async deleteWordCorrection(id: number): Promise<boolean> {
-    const result = await db.delete(wordCorrections).where(eq(wordCorrections.id, id)).returning();
+  async deleteWordCorrection(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(wordCorrections)
+      .where(and(eq(wordCorrections.id, id), eq(wordCorrections.userId, userId)))
+      .returning();
     return result.length > 0;
   }
 }

@@ -2,14 +2,11 @@
 // import time (db.ts, etc). Keep this as the first import.
 import "./env";
 
-import express, { type Request, Response, NextFunction } from "express";
-import session from "express-session";
-import createMemoryStore from "memorystore";
-import connectPgSimple from "connect-pg-simple";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { db, pool } from "./db";
+import { db } from "./db";
 import { sql } from "drizzle-orm";
 
 const app = express();
@@ -21,55 +18,15 @@ declare module "http" {
   }
 }
 
-declare module "express-session" {
-  interface SessionData {
-    isAuthenticated: boolean;
-  }
-}
-
-// =====================================================================
-// Session store: PostgreSQL in production, in-memory in development
-// =====================================================================
 const isProd = process.env.NODE_ENV === "production";
 
-let sessionStore: session.Store;
-if (isProd) {
-  const PgSession = connectPgSimple(session);
-  sessionStore = new PgSession({
-    pool,
-    tableName: "user_sessions",
-    // We create the table ourselves below — connect-pg-simple's auto-create
-    // reads table.sql relative to __dirname, which breaks when the package is
-    // bundled by esbuild (the SQL file isn't copied into dist/). Falsy here
-    // prevents the lazy fs.readFile call entirely.
-    createTableIfMissing: false,
-    errorLog: (...args) => console.error("[pg-session]", ...args),
-  });
-} else {
-  const MemoryStore = createMemoryStore(session);
-  sessionStore = new MemoryStore({ checkPeriod: 86400000 });
-}
-
 // Trust proxy when behind reverse proxy (Render, Replit, nginx, etc.)
+// Needed so req.protocol/req.secure reflect the original HTTPS request even
+// though express receives plain HTTP from the proxy. Auth tokens are validated
+// from headers, not cookies, but we still want correct request metadata.
 if (isProd) {
   app.set("trust proxy", 1);
 }
-
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "meeting-app-insecure-default-CHANGE-ME",
-    resave: false,
-    saveUninitialized: false,
-    store: sessionStore,
-    cookie: {
-      secure: isProd,
-      httpOnly: true,
-      // Same-origin (frontend served by same Express app), so "lax" is correct.
-      sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    },
-  })
-);
 
 app.use(
   express.json({
@@ -141,36 +98,9 @@ app.get("/api/health", async (_req, res) => {
 });
 
 (async () => {
-  // Ensure session table exists. We do this ourselves rather than relying on
-  // connect-pg-simple's createTableIfMissing because that feature reads
-  // table.sql via __dirname, which esbuild's bundling breaks.
-  if (isProd) {
-    try {
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS "user_sessions" (
-          "sid" varchar NOT NULL PRIMARY KEY,
-          "sess" json NOT NULL,
-          "expire" timestamp(6) NOT NULL
-        )
-      `);
-      await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_user_sessions_expire" ON "user_sessions" ("expire")`);
-    } catch (e) {
-      console.error("Failed to ensure user_sessions table:", e);
-    }
-  }
-
-  // Ensure optional columns exist (safe to run on every startup — IF NOT EXISTS is idempotent)
-  try {
-    await db.execute(sql`ALTER TABLE meeting_sessions ADD COLUMN IF NOT EXISTS series_name VARCHAR(255)`);
-    await db.execute(sql`
-      UPDATE meeting_sessions ms
-      SET series_name = mr.name
-      FROM meeting_series mr
-      WHERE ms.series_id = mr.id AND ms.series_name IS NULL
-    `);
-  } catch (e) {
-    console.error("DB startup migration warning:", e);
-  }
+  // Drizzle migrations are applied via `npm run db:push` at build time, so by
+  // the time the server boots all tables already match the current schema.
+  // No runtime ALTER TABLE patching is needed anymore.
 
   await registerRoutes(httpServer, app);
 

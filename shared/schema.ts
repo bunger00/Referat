@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 export const transcriptSegmentSchema = z.object({
@@ -80,6 +80,7 @@ export type ProposedDecision = z.infer<typeof proposedDecisionSchema>;
 
 export const meetingSeries = pgTable("meeting_series", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -102,6 +103,7 @@ export type VoiceProfile = typeof voiceProfiles.$inferSelect;
 
 export const meetingSessions = pgTable("meeting_sessions", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   title: varchar("title", { length: 255 }),
   seriesId: integer("series_id"),
   seriesIndex: integer("series_index"),
@@ -251,6 +253,7 @@ export type MeetingState = z.infer<typeof meetingStateSchema>;
 
 export const meetingDocuments = pgTable("meeting_documents", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   sessionId: integer("session_id"),
   seriesId: integer("series_id"),
   originalName: varchar("original_name", { length: 255 }).notNull(),
@@ -268,6 +271,7 @@ export type MeetingDocument = typeof meetingDocuments.$inferSelect;
 
 export const feedbackLog = pgTable("feedback_log", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   type: varchar("type", { length: 20 }).notNull(), // "action" | "decision"
   text: text("text").notNull(),
   context: text("context"),
@@ -281,6 +285,7 @@ export type FeedbackLogEntry = typeof feedbackLog.$inferSelect;
 
 export const aiPreferences = pgTable("ai_preferences", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().unique(),
   profileText: text("profile_text").notNull().default(""),
   signalCount: integer("signal_count").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -289,6 +294,7 @@ export type AiPreferences = typeof aiPreferences.$inferSelect;
 
 export const summaryFeedback = pgTable("summary_feedback", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   commentText: text("comment_text").notNull(),
   summaryExcerpt: text("summary_excerpt"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -297,6 +303,7 @@ export type SummaryFeedbackEntry = typeof summaryFeedback.$inferSelect;
 
 export const summaryPreferences = pgTable("summary_preferences", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().unique(),
   profileText: text("profile_text").notNull().default(""),
   feedbackCount: integer("feedback_count").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -305,6 +312,7 @@ export type SummaryPreferences = typeof summaryPreferences.$inferSelect;
 
 export const ruleDocuments = pgTable("rule_documents", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   filename: varchar("filename", { length: 255 }).notNull(),
   originalName: varchar("original_name", { length: 255 }).notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
@@ -322,6 +330,7 @@ export type RuleDocument = typeof ruleDocuments.$inferSelect;
 
 export const extractedRulesTable = pgTable("extracted_rules", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   documentId: integer("document_id").notNull(),
   externalRuleId: varchar("external_rule_id", { length: 100 }).notNull(),
   documentName: varchar("document_name", { length: 255 }).notNull(),
@@ -410,6 +419,7 @@ export type AnalyzeWithRulesResponse = z.infer<typeof analyzeWithRulesResponseSc
 // ============= Word Corrections (custom vocabulary) =============
 export const wordCorrections = pgTable("word_corrections", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
   original: varchar("original", { length: 255 }).notNull(),
   corrected: varchar("corrected", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

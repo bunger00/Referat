@@ -1,8 +1,8 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express } from "express";
 import { createServer, type Server } from "http";
 import OpenAI, { toFile } from "openai";
 import { z } from "zod";
-import bcrypt from "bcrypt";
+import { requireAuth, getUserId } from "./auth";
 import { analyzeRequestSchema, transcribeRequestSchema, summaryRequestSchema, transcriptSegmentSchema, type ExpertRole, type ExtractedRule, type Warning, type MeetingDocument, type TranscriptSegment } from "@shared/schema";
 import multer from "multer";
 import path from "path";
@@ -30,18 +30,6 @@ async function parsePdf(dataBuffer: Buffer): Promise<{ text: string }> {
   }
 }
 import { storage } from "./storage";
-
-// Authentication middleware
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  if (req.session?.isAuthenticated) {
-    next();
-  } else {
-    res.status(401).json({ error: "Ikke autorisert" });
-  }
-};
-
-// Get password hash from environment
-const APP_PASSWORD_HASH = process.env.APP_PASSWORD_HASH;
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -506,59 +494,14 @@ export async function registerRoutes(
   setInterval(pingNbWhisperEndpoints, KEEPALIVE_INTERVAL_MS);
   console.log(`nb-whisper keep-alive startet (hvert ${KEEPALIVE_INTERVAL_MS / 60000} minutt)`);
 
-  // ============= AUTHENTICATION ROUTES =============
-  
-  // POST /api/auth/login - authenticate with password
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      const { password } = req.body;
-      
-      if (!password) {
-        return res.status(400).json({ error: "Passord er påkrevd" });
-      }
-      
-      if (!APP_PASSWORD_HASH) {
-        console.error("APP_PASSWORD_HASH is not set");
-        return res.status(500).json({ error: "Autentisering er ikke konfigurert" });
-      }
-      
-      const isValid = await bcrypt.compare(password, APP_PASSWORD_HASH);
-      
-      if (isValid) {
-        req.session.isAuthenticated = true;
-        res.json({ success: true });
-      } else {
-        res.status(401).json({ error: "Feil passord" });
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).json({ error: "Innlogging feilet" });
-    }
-  });
-  
-  // POST /api/auth/logout - log out
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        console.error("Logout error:", err);
-        return res.status(500).json({ error: "Utlogging feilet" });
-      }
-      res.json({ success: true });
-    });
-  });
-  
-  // GET /api/auth/session - check if authenticated
-  app.get("/api/auth/session", (req, res) => {
-    res.json({ 
-      isAuthenticated: !!req.session?.isAuthenticated 
-    });
-  });
-  
   // ============= PROTECTED ROUTES =============
-  // All routes below require authentication
+  // Auth is handled by Supabase. Frontend does signup/login/oauth/logout via
+  // the Supabase JS client and sends `Authorization: Bearer <jwt>` on every
+  // API call. requireAuth (server/auth.ts) validates the JWT.
   
   // POST /api/transcribe - accepts audio chunk and returns transcript + diarization
   app.post("/api/transcribe", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const parsed = transcribeRequestSchema.safeParse(req.body);
       
@@ -724,6 +667,7 @@ export async function registerRoutes(
 
   // POST /api/transcribe-file - Upload and transcribe an audio file for post-meeting analysis
   app.post("/api/transcribe-file", requireAuth, uploadAudioFile.single("audio"), async (req, res) => {
+    const userId = getUserId(req);
     const chunkFiles: string[] = [];
     
     try {
@@ -903,6 +847,7 @@ export async function registerRoutes(
 
   // POST /api/clean-transcript - uses AI to fix obvious transcription errors based on context
   app.post("/api/clean-transcript", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const schema = z.object({ segments: z.array(transcriptSegmentSchema) });
       const parsed = schema.safeParse(req.body);
@@ -968,6 +913,7 @@ Fremgangsmåte:
 
   // POST /api/analyze - accepts last-minute transcript and returns 3 questions + warnings
   app.post("/api/analyze", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const parsed = analyzeRequestSchema.safeParse(req.body);
       
@@ -983,7 +929,7 @@ Fremgangsmåte:
       console.log("Analyze request - full transcript length:", fullTranscript?.length || 0);
 
       // Load learned preferences
-      const aiPrefs = await storage.getAiPreferences();
+      const aiPrefs = await storage.getAiPreferences(userId);
       const preferencesSection = aiPrefs?.profileText
         ? `\n\nLÆRTE BRUKERPREFERANSER (basert på brukerens tidligere aksept/avvisning av forslag – følg disse nøye):\n${aiPrefs.profileText}`
         : "";
@@ -1009,7 +955,7 @@ Fremgangsmåte:
 
       // Fetch meeting documents (session-scoped + series-scoped)
       const meetingDocs = (sessionId || seriesId)
-        ? await storage.getMeetingDocuments(sessionId, seriesId)
+        ? await storage.getMeetingDocuments(userId, sessionId, seriesId)
         : [];
       const hasMeetingDocs = meetingDocs.length > 0;
       const meetingDocsContext = hasMeetingDocs
@@ -1024,7 +970,7 @@ Fremgangsmåte:
       }
       
       // Get current rules for rule checking
-      const rulesState = await storage.getRulesState();
+      const rulesState = await storage.getRulesState(userId);
       const hasRules = rulesState.rules.length > 0;
       
       const expertPrompt = expertPrompts[role];
@@ -1382,6 +1328,7 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
 
   // POST /api/check-rules - lightweight rule checking only (every 10 seconds)
   app.post("/api/check-rules", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { transcript } = req.body;
       
@@ -1390,7 +1337,7 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
       }
       
       // Get current rules
-      const rulesState = await storage.getRulesState();
+      const rulesState = await storage.getRulesState(userId);
       if (rulesState.rules.length === 0) {
         return res.json({ warnings: [] });
       }
@@ -1462,6 +1409,7 @@ Hvis ingen advarsler: { "warnings": [] }`;
 
   // POST /api/summary - generates meeting summary
   app.post("/api/summary", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const parsed = summaryRequestSchema.safeParse(req.body);
       
@@ -1476,7 +1424,7 @@ Hvis ingen advarsler: { "warnings": [] }`;
       }
 
       // Load learned summary preferences
-      const summaryPrefs = await storage.getSummaryPreferences();
+      const summaryPrefs = await storage.getSummaryPreferences(userId);
       const summaryPreferencesSection = summaryPrefs?.profileText
         ? `\n\nLÆRTE BRUKERPREFERANSER FOR REFERAT (basert på tidligere tilbakemeldinger – følg disse nøye):\n${summaryPrefs.profileText}`
         : "";
@@ -1671,9 +1619,9 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
   // ============= Learning / Feedback Endpoints =============
 
   // Helper: update ai preferences profile asynchronously after N signals
-  async function updateAiProfile() {
+  async function updateAiProfile(userId: string) {
     try {
-      const logs = await storage.getFeedbackLog();
+      const logs = await storage.getFeedbackLog(userId);
       if (logs.length === 0) return;
 
       const accepted = logs.filter(l => l.accepted);
@@ -1713,7 +1661,7 @@ Vær konkret og handlingsorientert. Avvisningsårsaker er spesielt verdifulle �
 
       const profileText = profileResponse.choices[0]?.message?.content || "";
       if (profileText) {
-        await storage.setAiPreferences(profileText, logs.length);
+        await storage.setAiPreferences(userId, profileText, logs.length);
         console.log("AI preferences updated, signal count:", logs.length);
       }
     } catch (err: any) {
@@ -1721,9 +1669,9 @@ Vær konkret og handlingsorientert. Avvisningsårsaker er spesielt verdifulle �
     }
   }
 
-  async function updateSummaryProfile() {
+  async function updateSummaryProfile(userId: string) {
     try {
-      const feedbacks = await storage.getSummaryFeedbackLog();
+      const feedbacks = await storage.getSummaryFeedbackLog(userId);
       if (feedbacks.length === 0) return;
 
       // Separate diff-analysis entries from free-text comments
@@ -1767,7 +1715,7 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
 
       const profileText = profileResponse.choices[0]?.message?.content || "";
       if (profileText) {
-        await storage.setSummaryPreferences(profileText, feedbacks.length);
+        await storage.setSummaryPreferences(userId, profileText, feedbacks.length);
         console.log("Summary preferences updated, feedback count:", feedbacks.length);
       }
       return profileText;
@@ -1779,14 +1727,15 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
 
   // POST /api/feedback - log action/decision accept/reject signal
   app.post("/api/feedback", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { type, text, context, accepted, expertRole, source, reason } = req.body;
       if (!type || !text || accepted === undefined) {
         return res.status(400).json({ error: "Mangler type, text, eller accepted" });
       }
-      await storage.logFeedback({ type, text, context, accepted, reason, expertRole, source });
+      await storage.logFeedback(userId, { type, text, context, accepted, reason, expertRole, source });
       // Trigger async profile update after every signal (non-blocking)
-      updateAiProfile().catch(console.error);
+      updateAiProfile(userId).catch(console.error);
       res.json({ ok: true });
     } catch (err: any) {
       console.error("Error logging feedback:", err.message);
@@ -1796,14 +1745,15 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
 
   // POST /api/feedback/summary - log summary comment
   app.post("/api/feedback/summary", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { commentText, summaryExcerpt } = req.body;
       if (!commentText) {
         return res.status(400).json({ error: "Mangler commentText" });
       }
-      await storage.logSummaryFeedback(commentText, summaryExcerpt);
+      await storage.logSummaryFeedback(userId, commentText, summaryExcerpt);
       // Trigger async profile update after every feedback (non-blocking)
-      updateSummaryProfile().catch(console.error);
+      updateSummaryProfile(userId).catch(console.error);
       res.json({ ok: true });
     } catch (err: any) {
       console.error("Error logging summary feedback:", err.message);
@@ -1815,6 +1765,7 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
   // This is the core "memory" endpoint: compares what AI generated vs what user actually wanted,
   // extracts concrete style/content preferences, and IMMEDIATELY updates the learned profile.
   app.post("/api/feedback/summary-diff", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { original, edited, sessionTitle } = req.body;
       if (!original || !edited) {
@@ -1863,10 +1814,10 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
       const diffAnalysis = diffResponse.choices[0]?.message?.content || "";
 
       // Store the structured diff as a special feedback entry
-      await storage.logSummaryFeedback(diffAnalysis, edited.slice(0, 400));
+      await storage.logSummaryFeedback(userId, diffAnalysis, edited.slice(0, 400));
 
       // IMMEDIATELY update the profile (blocking — we want to return the new profile to the client)
-      const newProfileText = await updateSummaryProfile() || "";
+      const newProfileText = await updateSummaryProfile(userId) || "";
 
       res.json({ ok: true, analysis: diffAnalysis, profileText: newProfileText });
     } catch (err: any) {
@@ -1877,12 +1828,13 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // GET /api/learning/profiles - get both learned preference profiles
   app.get("/api/learning/profiles", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const [aiPrefs, summaryPrefs, feedbackLogs, summaryFeedbacks] = await Promise.all([
-        storage.getAiPreferences(),
-        storage.getSummaryPreferences(),
-        storage.getFeedbackLog(),
-        storage.getSummaryFeedbackLog(),
+        storage.getAiPreferences(userId),
+        storage.getSummaryPreferences(userId),
+        storage.getFeedbackLog(userId),
+        storage.getSummaryFeedbackLog(userId),
       ]);
       res.json({
         aiProfile: aiPrefs?.profileText || "",
@@ -1900,9 +1852,10 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // POST /api/learning/update-profile - force update ai preferences
   app.post("/api/learning/update-profile", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      await updateAiProfile();
-      const prefs = await storage.getAiPreferences();
+      await updateAiProfile(userId);
+      const prefs = await storage.getAiPreferences(userId);
       res.json({ ok: true, profileText: prefs?.profileText || "" });
     } catch (err: any) {
       res.status(500).json({ error: "Kunne ikke oppdatere AI-profil" });
@@ -1911,9 +1864,10 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // POST /api/learning/update-summary-profile - force update summary preferences
   app.post("/api/learning/update-summary-profile", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      await updateSummaryProfile();
-      const prefs = await storage.getSummaryPreferences();
+      await updateSummaryProfile(userId);
+      const prefs = await storage.getSummaryPreferences(userId);
       res.json({ ok: true, profileText: prefs?.profileText || "" });
     } catch (err: any) {
       res.status(500).json({ error: "Kunne ikke oppdatere referat-profil" });
@@ -1923,8 +1877,9 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
   // ============= Word Corrections (custom vocabulary) =============
 
   app.get("/api/word-corrections", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      const corrections = await storage.getWordCorrections();
+      const corrections = await storage.getWordCorrections(userId);
       res.json({ corrections });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1932,10 +1887,11 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
   });
 
   app.post("/api/word-corrections", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { original, corrected } = req.body;
       if (!original || !corrected) return res.status(400).json({ error: "original og corrected er påkrevd" });
-      const correction = await storage.upsertWordCorrection(original.trim(), corrected.trim());
+      const correction = await storage.upsertWordCorrection(userId, original.trim(), corrected.trim());
       res.json({ correction });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1943,9 +1899,10 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
   });
 
   app.delete("/api/word-corrections/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id);
-      const deleted = await storage.deleteWordCorrection(id);
+      const deleted = await storage.deleteWordCorrection(userId, id);
       if (!deleted) return res.status(404).json({ error: "Ikke funnet" });
       res.json({ ok: true });
     } catch (error: any) {
@@ -1957,10 +1914,11 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // GET /api/sessions - get all sessions, enriched with series name
   app.get("/api/sessions", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      const sessions = await storage.getMeetingSessions();
+      const sessions = await storage.getMeetingSessions(userId);
       // Attach series name from meeting_series so the client never has to do a separate lookup
-      const seriesList = await storage.getMeetingSeriesList();
+      const seriesList = await storage.getMeetingSeriesList(userId);
       const seriesMap = new Map(seriesList.map(s => [s.id, s.name]));
       const enriched = sessions.map(s => ({
         ...s,
@@ -1976,13 +1934,14 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // GET /api/sessions/:id - get specific session
   app.get("/api/sessions/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) {
         return res.status(400).json({ error: "Ugyldig ID" });
       }
 
-      const session = await storage.getMeetingSession(id);
+      const session = await storage.getMeetingSession(userId, id);
       if (!session) {
         return res.status(404).json({ error: "Sesjon ikke funnet" });
       }
@@ -1996,8 +1955,9 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // POST /api/sessions - create new session
   app.post("/api/sessions", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      const session = await storage.createMeetingSession({
+      const session = await storage.createMeetingSession(userId, {
         title: req.body.title || null,
         expertRole: req.body.expertRole || "bygg",
         questionInterval: req.body.questionInterval || 1,
@@ -2016,6 +1976,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // PATCH /api/sessions/:id - update session
   app.patch("/api/sessions/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) {
@@ -2038,7 +1999,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
       if (req.body.seriesId !== undefined) updates.seriesId = req.body.seriesId;
       if (req.body.seriesIndex !== undefined) updates.seriesIndex = req.body.seriesIndex;
 
-      const session = await storage.updateMeetingSession(id, updates);
+      const session = await storage.updateMeetingSession(userId, id, updates);
       if (!session) {
         return res.status(404).json({ error: "Sesjon ikke funnet" });
       }
@@ -2052,13 +2013,14 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // DELETE /api/sessions/:id - delete session
   app.delete("/api/sessions/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) {
         return res.status(400).json({ error: "Ugyldig ID" });
       }
 
-      const deleted = await storage.deleteMeetingSession(id);
+      const deleted = await storage.deleteMeetingSession(userId, id);
       if (!deleted) {
         return res.status(404).json({ error: "Sesjon ikke funnet" });
       }
@@ -2074,9 +2036,10 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // GET /api/series - list all series with session counts
   app.get("/api/series", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
-      const seriesList = await storage.getMeetingSeriesList();
-      const allSessions = await storage.getMeetingSessions();
+      const seriesList = await storage.getMeetingSeriesList(userId);
+      const allSessions = await storage.getMeetingSessions(userId);
       const result = seriesList.map(s => ({
         ...s,
         sessionCount: allSessions.filter(sess => sess.seriesId === s.id).length,
@@ -2089,10 +2052,11 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // POST /api/series - create new series
   app.post("/api/series", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const name = (req.body.name || "").trim();
       if (!name) return res.status(400).json({ error: "Serienavn er påkrevd" });
-      const series = await storage.createMeetingSeries({ name, description: req.body.description || null });
+      const series = await storage.createMeetingSeries(userId, { name, description: req.body.description || null });
       res.json({ series });
     } catch (error: any) {
       res.status(500).json({ error: "Kunne ikke opprette møteserie", details: error.message });
@@ -2101,17 +2065,18 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // PATCH /api/series/:id - rename series
   app.patch("/api/series/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
       const updates: Record<string, string> = {};
       if (req.body.name) updates.name = req.body.name.trim();
       if (req.body.description !== undefined) updates.description = req.body.description;
-      const series = await storage.updateMeetingSeries(id, updates);
+      const series = await storage.updateMeetingSeries(userId, id, updates);
       if (!series) return res.status(404).json({ error: "Møteserie ikke funnet" });
       // Propagate the new name to all sessions in this series so series_name stays in sync
       if (updates.name) {
-        await storage.updateSeriesNameOnSessions(id, updates.name);
+        await storage.updateSeriesNameOnSessions(userId, id, updates.name);
       }
       res.json({ series });
     } catch (error: any) {
@@ -2121,10 +2086,11 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // DELETE /api/series/:id - delete series (sessions become standalone)
   app.delete("/api/series/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
-      const deleted = await storage.deleteMeetingSeries(id);
+      const deleted = await storage.deleteMeetingSeries(userId, id);
       if (!deleted) return res.status(404).json({ error: "Møteserie ikke funnet" });
       res.json({ success: true });
     } catch (error: any) {
@@ -2134,10 +2100,11 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
   // GET /api/series/:id/summaries - get summaries of all past meetings in a series (for AI cross-analysis)
   app.get("/api/series/:id/summaries", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
-      const sessions = await storage.getSessionsInSeries(id);
+      const sessions = await storage.getSessionsInSeries(userId, id);
       const summaries = sessions
         .filter(s => s.summary)
         .map(s => ({
@@ -2283,6 +2250,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
 
   // POST /api/rules/upload - Upload document and extract rules
   app.post("/api/rules/upload", requireAuth, ruleUpload.single("document"), async (req, res) => {
+    const userId = getUserId(req);
     try {
       if (!req.file) {
         return res.status(400).json({ success: false, error: "Ingen fil lastet opp" });
@@ -2291,7 +2259,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
       const file = req.file;
 
       // Create document entry with processing status
-      const documentId = await storage.addDocument({
+      const documentId = await storage.addDocument(userId, {
         filename: file.filename,
         originalName: file.originalname,
         mimeType: file.mimetype,
@@ -2306,8 +2274,8 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
       try {
         text = await extractTextFromDocument(file.path, file.mimetype);
       } catch (err: any) {
-        await storage.updateDocumentStatus(documentId, "error", 0, err.message);
-        const state = await storage.getRulesState();
+        await storage.updateDocumentStatus(userId, documentId, "error", 0, err.message);
+        const state = await storage.getRulesState(userId);
         return res.status(500).json({ 
           success: false, 
           error: "Kunne ikke lese dokumentet", 
@@ -2331,10 +2299,10 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
           tags: r.tags,
         }));
         
-        await storage.addRules(dbRules);
-        await storage.updateDocumentStatus(documentId, "ready", extractedRules.length);
+        await storage.addRules(userId, dbRules);
+        await storage.updateDocumentStatus(userId, documentId, "ready", extractedRules.length);
 
-        const state = await storage.getRulesState();
+        const state = await storage.getRulesState(userId);
         res.json({
           success: true,
           document: state.documents.find(d => d.id === String(documentId)),
@@ -2342,8 +2310,8 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
         });
       } catch (err: any) {
         console.error("Rule extraction error:", err);
-        await storage.updateDocumentStatus(documentId, "error", 0, "Regelekstraksjon feilet");
-        const state = await storage.getRulesState();
+        await storage.updateDocumentStatus(userId, documentId, "error", 0, "Regelekstraksjon feilet");
+        const state = await storage.getRulesState(userId);
         res.status(500).json({ 
           success: false, 
           error: "Kunne ikke trekke ut regler",
@@ -2358,7 +2326,8 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
 
   // GET /api/rules - Get all rules and documents
   app.get("/api/rules", requireAuth, async (req, res) => {
-    const state = await storage.getRulesState();
+    const userId = getUserId(req);
+    const state = await storage.getRulesState(userId);
     res.json({
       documents: state.documents,
       rules: state.rules,
@@ -2370,19 +2339,21 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
 
   // DELETE /api/rules - Clear all rules
   app.delete("/api/rules", requireAuth, async (req, res) => {
-    await storage.clearRules();
+    const userId = getUserId(req);
+    await storage.clearRules(userId);
     res.json({ success: true });
   });
 
   // DELETE /api/rules/document/:id - Remove specific document and its rules
   app.delete("/api/rules/document/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     const documentId = parseInt(req.params.id, 10);
     
     if (isNaN(documentId)) {
       return res.status(400).json({ error: "Ugyldig dokument-ID" });
     }
     
-    const state = await storage.getRulesState();
+    const state = await storage.getRulesState(userId);
     const doc = state.documents.find(d => d.id === String(documentId));
     
     if (!doc) {
@@ -2391,8 +2362,8 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
 
     // Remove rules from this document
     const rulesBeforeCount = state.rules.length;
-    await storage.removeDocument(documentId);
-    const stateAfter = await storage.getRulesState();
+    await storage.removeDocument(userId, documentId);
+    const stateAfter = await storage.getRulesState(userId);
 
     res.json({ 
       success: true, 
@@ -2402,6 +2373,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
 
   // POST /api/rules/text - Extract rules from pasted text
   app.post("/api/rules/text", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const { text, name } = req.body;
       
@@ -2410,7 +2382,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
       }
       
       // Check document limit
-      const state = await storage.getRulesState();
+      const state = await storage.getRulesState(userId);
       if (state.documents.length >= 5) {
         return res.status(400).json({ success: false, error: "Maks 5 dokumenter tillatt" });
       }
@@ -2418,7 +2390,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
       const documentName = name || `Innlimt tekst ${new Date().toLocaleString("no-NO")}`;
       
       // Create document entry in database
-      const documentId = await storage.addDocument({
+      const documentId = await storage.addDocument(userId, {
         filename: `text-${Date.now()}`,
         originalName: documentName,
         mimeType: "text/plain",
@@ -2443,10 +2415,10 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
           tags: r.tags,
         }));
         
-        await storage.addRules(dbRules);
-        await storage.updateDocumentStatus(documentId, "ready", extractedRules.length);
+        await storage.addRules(userId, dbRules);
+        await storage.updateDocumentStatus(userId, documentId, "ready", extractedRules.length);
         
-        const stateAfter = await storage.getRulesState();
+        const stateAfter = await storage.getRulesState(userId);
         res.json({
           success: true,
           document: stateAfter.documents.find(d => d.id === String(documentId)),
@@ -2454,8 +2426,8 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
         });
       } catch (err: any) {
         console.error("Rule extraction from text error:", err);
-        await storage.updateDocumentStatus(documentId, "error", 0, "Regelekstraksjon feilet");
-        const stateAfter = await storage.getRulesState();
+        await storage.updateDocumentStatus(userId, documentId, "error", 0, "Regelekstraksjon feilet");
+        const stateAfter = await storage.getRulesState(userId);
         res.status(500).json({
           success: false,
           error: "Kunne ikke trekke ut regler fra teksten",
@@ -2525,6 +2497,7 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
 
   // POST /api/meeting-documents/upload
   app.post("/api/meeting-documents/upload", requireAuth, meetingDocUpload.single("document"), async (req, res) => {
+    const userId = getUserId(req);
     try {
       const file = req.file;
       const sessionId = req.body.sessionId ? parseInt(req.body.sessionId) : null;
@@ -2560,7 +2533,7 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
       // AI-index key points
       const keyPoints = await extractKeyPointsFromText(rawText, originalName);
 
-      const doc = await storage.createMeetingDocument({
+      const doc = await storage.createMeetingDocument(userId, {
         sessionId,
         seriesId,
         originalName,
@@ -2578,10 +2551,11 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
 
   // GET /api/meeting-documents
   app.get("/api/meeting-documents", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const sessionId = req.query.sessionId ? parseInt(req.query.sessionId as string) : undefined;
       const seriesId = req.query.seriesId ? parseInt(req.query.seriesId as string) : undefined;
-      const docs = await storage.getMeetingDocuments(sessionId, seriesId);
+      const docs = await storage.getMeetingDocuments(userId, sessionId, seriesId);
       res.json({ documents: docs });
     } catch (error: any) {
       console.error("Meeting document list error:", error);
@@ -2591,9 +2565,10 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
 
   // DELETE /api/meeting-documents/:id
   app.delete("/api/meeting-documents/:id", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
     try {
       const id = parseInt(req.params.id);
-      const deleted = await storage.deleteMeetingDocument(id);
+      const deleted = await storage.deleteMeetingDocument(userId, id);
       res.json({ success: deleted });
     } catch (error: any) {
       console.error("Meeting document delete error:", error);

@@ -2219,11 +2219,12 @@ export default function MeetingPage() {
 
   const logout = async () => {
     try {
-      await apiRequest("POST", "/api/auth/logout");
-      window.location.href = "/";
+      const { supabase } = await import("@/lib/supabase");
+      await supabase.auth.signOut();
+      // App.tsx's onAuthStateChange listener flips state and shows the login
+      // page; no manual redirect needed.
     } catch (error) {
       console.error("Logout error:", error);
-      window.location.href = "/";
     }
   };
 
