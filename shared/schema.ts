@@ -428,3 +428,88 @@ export const wordCorrections = pgTable("word_corrections", {
 export const insertWordCorrectionSchema = createInsertSchema(wordCorrections).omit({ id: true, createdAt: true });
 export type InsertWordCorrection = z.infer<typeof insertWordCorrectionSchema>;
 export type WordCorrection = typeof wordCorrections.$inferSelect;
+
+// ============= Intervjutrening =============
+
+export const interviewCriterionSchema = z.enum([
+  "konkretisering",
+  "fagdybde",
+  "eierskap",
+  "refleksjon",
+  "samhandling",
+  "struktur",
+]);
+export type InterviewCriterion = z.infer<typeof interviewCriterionSchema>;
+
+export const interviewCriterionLabels: Record<InterviewCriterion, string> = {
+  konkretisering: "Konkretiseringsevne",
+  fagdybde: "Erfaringsdybde",
+  eierskap: "Eierskap & rolle",
+  refleksjon: "Refleksjon & læring",
+  samhandling: "Samhandling",
+  struktur: "Struktur & klarhet",
+};
+
+export const interviewScoreSchema = z.object({
+  score: z.number().min(0).max(10),
+  rationale: z.string(),
+});
+export type InterviewScore = z.infer<typeof interviewScoreSchema>;
+
+export const interviewScoresSchema = z.object({
+  konkretisering: interviewScoreSchema,
+  fagdybde: interviewScoreSchema,
+  eierskap: interviewScoreSchema,
+  refleksjon: interviewScoreSchema,
+  samhandling: interviewScoreSchema,
+  struktur: interviewScoreSchema,
+});
+export type InterviewScores = z.infer<typeof interviewScoresSchema>;
+
+export const starStatusSchema = z.object({
+  situation: z.boolean(),
+  task: z.boolean(),
+  action: z.boolean(),
+  result: z.boolean(),
+});
+export type StarStatus = z.infer<typeof starStatusSchema>;
+
+export const interviewEvalSnapshotSchema = z.object({
+  at: z.string(),
+  minute: z.number(),
+  scores: interviewScoresSchema,
+  star: starStatusSchema,
+  candidateWordCount: z.number(),
+});
+export type InterviewEvalSnapshot = z.infer<typeof interviewEvalSnapshotSchema>;
+
+export const interviewReportSchema = z.object({
+  summary: z.string(),
+  strengths: z.array(z.string()),
+  improvements: z.array(z.string()),
+  finalScores: interviewScoresSchema,
+  generatedAt: z.string(),
+});
+export type InterviewReport = z.infer<typeof interviewReportSchema>;
+
+export const interviewSessions = pgTable("interview_sessions", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  title: varchar("title", { length: 255 }),
+  industry: varchar("industry", { length: 50 }).default("bygg"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  endedAt: timestamp("ended_at"),
+  elapsedSeconds: integer("elapsed_seconds").default(0),
+  transcript: jsonb("transcript").$type<TranscriptSegment[]>().default([]),
+  // Latest live evaluation (overwritten each minute)
+  currentScores: jsonb("current_scores").$type<InterviewScores | null>().default(null),
+  currentStar: jsonb("current_star").$type<StarStatus | null>().default(null),
+  // Full history of evaluations through the interview (for trend chart)
+  evalHistory: jsonb("eval_history").$type<InterviewEvalSnapshot[]>().default([]),
+  // Final report generated when interview is ended
+  report: jsonb("report").$type<InterviewReport | null>().default(null),
+});
+
+export const insertInterviewSessionSchema = createInsertSchema(interviewSessions).omit({ id: true, startedAt: true });
+export type InsertInterviewSession = z.infer<typeof insertInterviewSessionSchema>;
+export type InterviewSession = typeof interviewSessions.$inferSelect;

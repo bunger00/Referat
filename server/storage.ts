@@ -1,4 +1,4 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
@@ -56,6 +56,13 @@ export interface IStorage {
   getWordCorrections(userId: string): Promise<WordCorrection[]>;
   upsertWordCorrection(userId: string, original: string, corrected: string): Promise<WordCorrection>;
   deleteWordCorrection(userId: string, id: number): Promise<boolean>;
+
+  // Interview training
+  getInterviewSessions(userId: string): Promise<InterviewSession[]>;
+  getInterviewSession(userId: string, id: number): Promise<InterviewSession | undefined>;
+  createInterviewSession(userId: string, data: Omit<InsertInterviewSession, "userId">): Promise<InterviewSession>;
+  updateInterviewSession(userId: string, id: number, updates: Record<string, unknown>): Promise<InterviewSession | undefined>;
+  deleteInterviewSession(userId: string, id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -339,6 +346,40 @@ export class DatabaseStorage implements IStorage {
   async deleteWordCorrection(userId: string, id: number): Promise<boolean> {
     const result = await db.delete(wordCorrections)
       .where(and(eq(wordCorrections.id, id), eq(wordCorrections.userId, userId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  // ============= Interview training =============
+
+  async getInterviewSessions(userId: string): Promise<InterviewSession[]> {
+    return await db.select().from(interviewSessions)
+      .where(eq(interviewSessions.userId, userId))
+      .orderBy(desc(interviewSessions.startedAt));
+  }
+
+  async getInterviewSession(userId: string, id: number): Promise<InterviewSession | undefined> {
+    const [row] = await db.select().from(interviewSessions)
+      .where(and(eq(interviewSessions.id, id), eq(interviewSessions.userId, userId)));
+    return row;
+  }
+
+  async createInterviewSession(userId: string, data: Omit<InsertInterviewSession, "userId">): Promise<InterviewSession> {
+    const [row] = await db.insert(interviewSessions).values({ ...data, userId } as any).returning();
+    return row;
+  }
+
+  async updateInterviewSession(userId: string, id: number, updates: Record<string, unknown>): Promise<InterviewSession | undefined> {
+    const [row] = await db.update(interviewSessions)
+      .set(updates)
+      .where(and(eq(interviewSessions.id, id), eq(interviewSessions.userId, userId)))
+      .returning();
+    return row;
+  }
+
+  async deleteInterviewSession(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(interviewSessions)
+      .where(and(eq(interviewSessions.id, id), eq(interviewSessions.userId, userId)))
       .returning();
     return result.length > 0;
   }
