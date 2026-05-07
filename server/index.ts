@@ -3,6 +3,8 @@
 import "./env";
 
 import express, { type Request, type Response, type NextFunction } from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -28,6 +30,15 @@ if (isProd) {
   app.set("trust proxy", 1);
 }
 
+// Security headers via helmet. CSP er pragmatisk: vi bruker <script> tags for
+// Vite-dev og inline-script i index.html, men slår på alt annet helmet gir.
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Vite dev og runtime-injected base64-bilder
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
 app.use(
   express.json({
     limit: "50mb",
@@ -36,6 +47,33 @@ app.use(
     },
   }),
 );
+
+// Rate-limiting på dyre AI-endepunkter — per IP. Bevarer normal bruk men
+// stopper aggressiv automatisert misbruk hvis en JWT skulle lekke.
+const aiHeavyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 min
+  max: 30, // 30 kall per minutt per IP — rikelig for normal bruk (analyze + transcribe per minutt)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "For mange forespørsler — vent et øyeblikk og prøv igjen." },
+});
+
+const visionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10, // skjermbilder/transcribe-file er dyre — strammere
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "For mange skjermbilde-forespørsler — vent et øyeblikk." },
+});
+
+app.use("/api/transcribe", aiHeavyLimiter);
+app.use("/api/transcribe-file", visionLimiter);
+app.use("/api/analyze", aiHeavyLimiter);
+app.use("/api/summary", aiHeavyLimiter);
+app.use("/api/screenshots/analyze", visionLimiter);
+app.use("/api/community/aggregate", visionLimiter);
+app.use("/api/interview/analyze", aiHeavyLimiter);
+app.use("/api/interview/report", aiHeavyLimiter);
 
 app.use(express.urlencoded({ extended: false }));
 

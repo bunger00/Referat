@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean, uuid } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean, uuid, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 export const transcriptSegmentSchema = z.object({
@@ -84,7 +84,9 @@ export const meetingSeries = pgTable("meeting_series", {
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_meeting_series_user").on(t.userId),
+}));
 
 export const insertMeetingSeriesSchema = createInsertSchema(meetingSeries).omit({ id: true, createdAt: true });
 export type InsertMeetingSeries = z.infer<typeof insertMeetingSeriesSchema>;
@@ -119,7 +121,10 @@ export const meetingSessions = pgTable("meeting_sessions", {
   decisions: jsonb("decisions").$type<ProposedDecision[]>().default([]),
   speakerMappings: jsonb("speaker_mappings").$type<Record<string, string>>().default({}),
   summary: text("summary"),
-});
+}, (t) => ({
+  userIdx: index("idx_meeting_sessions_user").on(t.userId),
+  seriesIdx: index("idx_meeting_sessions_series").on(t.seriesId),
+}));
 
 export const insertMeetingSessionSchema = createInsertSchema(meetingSessions).omit({ id: true, startedAt: true });
 export type InsertMeetingSession = z.infer<typeof insertMeetingSessionSchema>;
@@ -266,7 +271,11 @@ export const meetingDocuments = pgTable("meeting_documents", {
   keyPoints: text("key_points").notNull(),
   rawContentPreview: text("raw_content_preview"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_meeting_documents_user").on(t.userId),
+  sessionIdx: index("idx_meeting_documents_session").on(t.sessionId),
+  seriesIdx: index("idx_meeting_documents_series").on(t.seriesId),
+}));
 
 export const insertMeetingDocumentSchema = createInsertSchema(meetingDocuments).omit({ id: true, createdAt: true });
 export type InsertMeetingDocument = z.infer<typeof insertMeetingDocumentSchema>;
@@ -277,15 +286,17 @@ export type MeetingDocument = typeof meetingDocuments.$inferSelect;
 export const feedbackLog = pgTable("feedback_log", {
   id: serial("id").primaryKey(),
   userId: uuid("user_id").notNull(),
-  type: varchar("type", { length: 20 }).notNull(), // "action" | "decision"
+  type: varchar("type", { length: 20 }).notNull(),
   text: text("text").notNull(),
   context: text("context"),
   accepted: boolean("accepted").notNull(),
-  reason: text("reason"), // optional rejection reason
+  reason: text("reason"),
   expertRole: varchar("expert_role", { length: 50 }),
-  source: varchar("source", { length: 10 }).default("ai"), // "ai" | "manual"
+  source: varchar("source", { length: 10 }).default("ai"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_feedback_log_user").on(t.userId),
+}));
 export type FeedbackLogEntry = typeof feedbackLog.$inferSelect;
 
 export const aiPreferences = pgTable("ai_preferences", {
@@ -307,7 +318,9 @@ export const summaryFeedback = pgTable("summary_feedback", {
   commentText: text("comment_text").notNull(),
   summaryExcerpt: text("summary_excerpt"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_summary_feedback_user").on(t.userId),
+}));
 export type SummaryFeedbackEntry = typeof summaryFeedback.$inferSelect;
 
 export const summaryPreferences = pgTable("summary_preferences", {
@@ -331,7 +344,9 @@ export const ruleDocuments = pgTable("rule_documents", {
   rulesExtracted: integer("rules_extracted").default(0),
   errorMessage: text("error_message"),
   uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_rule_documents_user").on(t.userId),
+}));
 
 export const insertRuleDocumentSchema = createInsertSchema(ruleDocuments).omit({ id: true, uploadedAt: true });
 export type InsertRuleDocument = z.infer<typeof insertRuleDocumentSchema>;
@@ -349,7 +364,10 @@ export const extractedRulesTable = pgTable("extracted_rules", {
   summary: text("summary").notNull(),
   tags: text("tags").array().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_extracted_rules_user").on(t.userId),
+  documentIdx: index("idx_extracted_rules_document").on(t.documentId),
+}));
 
 export const insertExtractedRuleSchema = createInsertSchema(extractedRulesTable).omit({ id: true, createdAt: true });
 export type InsertExtractedRule = z.infer<typeof insertExtractedRuleSchema>;
@@ -432,7 +450,9 @@ export const wordCorrections = pgTable("word_corrections", {
   original: varchar("original", { length: 255 }).notNull(),
   corrected: varchar("corrected", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  userIdx: index("idx_word_corrections_user").on(t.userId),
+}));
 
 export const insertWordCorrectionSchema = createInsertSchema(wordCorrections).omit({ id: true, createdAt: true });
 export type InsertWordCorrection = z.infer<typeof insertWordCorrectionSchema>;
@@ -517,7 +537,9 @@ export const interviewSessions = pgTable("interview_sessions", {
   evalHistory: jsonb("eval_history").$type<InterviewEvalSnapshot[]>().default([]),
   // Final report generated when interview is ended
   report: jsonb("report").$type<InterviewReport | null>().default(null),
-});
+}, (t) => ({
+  userIdx: index("idx_interview_sessions_user").on(t.userId),
+}));
 
 export const insertInterviewSessionSchema = createInsertSchema(interviewSessions).omit({ id: true, startedAt: true });
 export type InsertInterviewSession = z.infer<typeof insertInterviewSessionSchema>;
@@ -534,7 +556,10 @@ export const meetingScreenshots = pgTable("meeting_screenshots", {
   description: text("description").notNull(),
   capturedAt: timestamp("captured_at").defaultNow().notNull(),
   includedInSummary: boolean("included_in_summary").notNull().default(false),
-});
+}, (t) => ({
+  userIdx: index("idx_meeting_screenshots_user").on(t.userId),
+  sessionIdx: index("idx_meeting_screenshots_session").on(t.sessionId),
+}));
 
 export const insertMeetingScreenshotSchema = createInsertSchema(meetingScreenshots).omit({ id: true, capturedAt: true });
 export type InsertMeetingScreenshot = z.infer<typeof insertMeetingScreenshotSchema>;
@@ -571,7 +596,10 @@ export const communitySignals = pgTable("community_signals", {
   canaryLosses: integer("canary_losses").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  statusIdx: index("idx_community_signals_status").on(t.status),
+  typeIdx: index("idx_community_signals_type").on(t.signalType),
+}));
 
 export type CommunitySignal = typeof communitySignals.$inferSelect;
 export const insertCommunitySignalSchema = createInsertSchema(communitySignals).omit({ id: true, createdAt: true, updatedAt: true });
