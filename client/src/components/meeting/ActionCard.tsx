@@ -149,59 +149,78 @@ export function ActionCard({
     >
       {!expanded ? (
         <>
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="text-left w-full"
-            aria-label="Rediger og godkjenn"
-          >
+          <div className="space-y-1.5">
             <p className="text-sm font-medium leading-snug">{action.text}</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              {action.suggestedOwner ? (
-                <span className="inline-flex items-center gap-1">
-                  <UserCircle2 className="h-3 w-3" />
-                  {action.suggestedOwner}
-                </span>
-              ) : null}
-              {action.suggestedDeadline ? (
-                <span className="inline-flex items-center gap-1">
-                  <CalendarDays className="h-3 w-3" />
-                  {action.suggestedDeadline}
-                </span>
-              ) : null}
-              {action.createdAt ? (
-                <span className="font-mono text-muted-foreground/70">
-                  {formatClock(action.createdAt)}
-                </span>
-              ) : null}
-            </div>
-          </button>
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {(action.suggestedOwner || action.suggestedDeadline || action.createdAt) ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {action.suggestedOwner ? (
+                  <span className="inline-flex items-center gap-1">
+                    <UserCircle2 className="h-3 w-3" />
+                    {action.suggestedOwner}
+                  </span>
+                ) : null}
+                {action.suggestedDeadline ? (
+                  <span className="inline-flex items-center gap-1">
+                    <CalendarDays className="h-3 w-3" />
+                    {action.suggestedDeadline}
+                  </span>
+                ) : null}
+                {action.createdAt ? (
+                  <span className="font-mono text-muted-foreground/70">
+                    {formatClock(action.createdAt)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          {/* Tap-targets: minst h-10 (40px) på mobil for å møte iOS sin tap-target-anbefaling.
+              "Godkjenn" gir én-tap godkjenning med foreslåtte verdier.
+              "Rediger" åpner inline-edit for å justere. */}
+          <div className="mt-3 grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center">
             <Button
               size="sm"
-              onClick={() => setExpanded(true)}
-              className="h-7 px-2.5 text-xs gap-1 bg-success text-success-foreground hover:bg-success/90"
+              onClick={() =>
+                onApprove(action.id, {
+                  text: action.text,
+                  owner: action.suggestedOwner ?? "",
+                  deadline:
+                    action.suggestedDeadline && /^\d{4}-\d{2}-\d{2}$/.test(action.suggestedDeadline)
+                      ? action.suggestedDeadline
+                      : "",
+                })
+              }
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-success text-success-foreground hover:bg-success/90"
             >
-              <Check className="h-3.5 w-3.5" />
+              <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               Godkjenn
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExpanded(true)}
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5"
+              aria-label="Rediger og godkjenn"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Rediger
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onMoveToDecision(action.id)}
-              className="h-7 px-2 text-xs gap-1 text-decision hover:bg-decision/10"
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 text-decision hover:bg-decision/10"
               title="Flytt til beslutninger"
             >
-              <ArrowRightLeft className="h-3 w-3" />
-              Til beslutning
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+              <span className="truncate">Til beslutning</span>
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onReject(action.id)}
-              className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-destructive"
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 text-muted-foreground hover:text-destructive"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               Avvis
             </Button>
           </div>
@@ -239,26 +258,26 @@ export function ActionCard({
               />
             </div>
           </div>
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <div className="text-[10px] text-muted-foreground">
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+            <div className="hidden sm:block text-[10px] text-muted-foreground">
               <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">⌘ Enter</kbd> godkjenn ·{" "}
               <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">Esc</kbd> lukk
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center">
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onClick={() => setExpanded(false)}
-                className="h-7 text-xs"
+                className="h-10 sm:h-8 text-sm sm:text-xs"
               >
                 Avbryt
               </Button>
               <Button
                 size="sm"
                 onClick={handleApprove}
-                className="h-7 px-3 text-xs gap-1 bg-success text-success-foreground hover:bg-success/90"
+                className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-success text-success-foreground hover:bg-success/90"
               >
-                <Check className="h-3.5 w-3.5" />
+                <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                 Godkjenn
               </Button>
             </div>

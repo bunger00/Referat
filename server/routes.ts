@@ -1757,19 +1757,23 @@ WEIGHTING OF THE TRANSCRIPT
 OUTPUT FORMAT
 Return the meeting minutes as MARKDOWN with the following structure and headings (exactly in this order):
 
-# Møtereferat
+# Møtereferat: <Møtetittel her>
+
+> **<En konsis 1-2 setningers oppsummering av møtets formål og hovedutfall — en lead-tekst som leser godt rett under tittelen.>**
 
 ## 1. Nøkkelinformasjon
-Use the metadata provided (user-provided fields take priority). If a field is missing, write [Mangler].
 
-- **Møtetittel:** <fra metadata eller utledet fra transkript>
-- **Dato:** <fra metadata>
-- **Tid:** <fra metadata, og varighet hvis kjent>
-- **Sted / format:** <fra metadata, eller "fysisk / Teams / Zoom" hvis mulig å utlede>
-- **Møteleder:** <fra metadata>
-- **Referent:** <fra metadata, ellers "AI-basert referat fra transkribering">
-- **Deltakere:** Navn 1, Navn 2, Navn 3 (kommaseparert på én linje, IKKE punktliste under hverandre)
-- **Fraværende (meldt forfall):** Navn 1, Navn 2 (kommaseparert; eller "Ingen nevnt")
+Bruk metadata når tilgjengelig. Hvis et felt mangler, skriv [Mangler]. Bruk EKSAKT denne 2-kolonne tabell-formatet (ikke punktliste):
+
+| | |
+|---|---|
+| **Dato** | <dato fra metadata> |
+| **Tid** | <tid fra metadata + varighet hvis kjent> |
+| **Sted / format** | <fysisk lokasjon eller Teams/Zoom> |
+| **Møteleder** | <navn> |
+| **Referent** | <navn eller "AI-basert referat fra transkribering"> |
+| **Deltakere** | <Navn 1, Navn 2, Navn 3 — kommaseparert på én linje> |
+| **Fraværende** | <Navn 1, Navn 2 — kommaseparert, eller "Ingen meldt"> |
 
 ## 2. Kort oppsummering
 3–7 concise bullet points that quickly explain:
@@ -1787,7 +1791,7 @@ Bruk KUN de bekreftede beslutningene som er gitt under "Bekreftede beslutninger"
 
 ## 4. Aksjonspunkter (To-do)
 **STRENGT KRAV — 1:1 MED BRUKERENS PANEL:**
-Bruk KUN de godkjente og foreslåtte aksjonspunktene fra input. IKKE legg til nye aksjoner fra transkriptet. Manuelle items (source = manual) skal også med.
+Bruk KUN GODKJENTE aksjonspunkter fra input. Foreslåtte (ikke godkjent av bruker) tas IKKE med — brukeren har bevisst ikke bekreftet dem. Manuelle items (source = manual) er allerede godkjent og skal med. Hvis ingen godkjente: skriv "Ingen godkjente aksjonspunkter".
 
 | # | Aksjon | Eier | Frist |
 |---|--------|------|-------|
