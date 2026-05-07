@@ -10,6 +10,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { logger } from "./lib/logger";
 
 const app = express();
 const httpServer = createServer(app);
@@ -77,15 +78,9 @@ app.use("/api/interview/report", aiHeavyLimiter);
 
 app.use(express.urlencoded({ extended: false }));
 
+/** Tidligere ad-hoc logger — beholdt for backward compat. Bruker pino under hood. */
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
+  logger.info({ source }, message);
 }
 
 // Request logging for /api routes
