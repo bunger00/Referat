@@ -14,6 +14,7 @@ import { Page, PageHeader, Section, Panel } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
@@ -200,7 +201,52 @@ function AITab() {
       </Section>
 
       <LearningProfile />
+
+      <CommunityLearningSection />
     </div>
+  );
+}
+
+function CommunityLearningSection() {
+  const { data, refetch } = useQuery<{ optOut: boolean; contributions: number }>({
+    queryKey: ["/api/community/preferences"],
+  });
+  const { toast } = useToast();
+  const toggle = useMutation({
+    mutationFn: async (optOut: boolean) => {
+      await apiRequest("PATCH", "/api/community/preferences", { optOut });
+    },
+    onSuccess: () => {
+      refetch();
+      toast({ title: "Lagret" });
+    },
+  });
+
+  return (
+    <Section
+      title="Kollektiv læring"
+      description="Anonymiserte mønstre fra dine manuelle tillegg deles med fellesskapet slik at AI-en blir bedre for alle. Aldri rådata, aldri navn — kun abstraherte fang-regler."
+    >
+      <Panel className="p-5 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <div className="font-medium">Bidra til fellesskapet</div>
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-prose">
+              Når du legger til en aksjon eller beslutning manuelt, sender vi mønsteret (uten navn, prosjekt eller sted) til en delt læringspott. AI-en til alle brukere blir gradvis bedre på å fange samme type signal.
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Du har bidratt med <strong className="text-foreground">{data?.contributions ?? 0}</strong> anonymiserte signaler.
+            </p>
+          </div>
+          <Switch
+            checked={!data?.optOut}
+            onCheckedChange={(checked) => toggle.mutate(!checked)}
+            disabled={toggle.isPending}
+            aria-label="Bidra til kollektiv læring"
+          />
+        </div>
+      </Panel>
+    </Section>
   );
 }
 

@@ -293,6 +293,10 @@ export const aiPreferences = pgTable("ai_preferences", {
   userId: uuid("user_id").notNull().unique(),
   profileText: text("profile_text").notNull().default(""),
   signalCount: integer("signal_count").notNull().default(0),
+  // Opt-out av kollektiv læring (default false = bruker bidrar anonymt)
+  communityOptOut: boolean("community_opt_out").notNull().default(false),
+  // Hvor mange anonymiserte signaler brukeren har bidratt med
+  communityContributions: integer("community_contributions").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 export type AiPreferences = typeof aiPreferences.$inferSelect;
@@ -535,3 +539,40 @@ export const meetingScreenshots = pgTable("meeting_screenshots", {
 export const insertMeetingScreenshotSchema = createInsertSchema(meetingScreenshots).omit({ id: true, capturedAt: true });
 export type InsertMeetingScreenshot = z.infer<typeof insertMeetingScreenshotSchema>;
 export type MeetingScreenshot = typeof meetingScreenshots.$inferSelect;
+
+// ============= Kollektiv læring (anonymisert, opt-out) =============
+
+export const communitySignalTypeSchema = z.enum([
+  "missed_action",
+  "missed_decision",
+  "rejected_pattern",
+  "summary_pattern",
+]);
+export type CommunitySignalType = z.infer<typeof communitySignalTypeSchema>;
+
+export const communitySignalStatusSchema = z.enum(["candidate", "canary", "promoted", "demoted"]);
+export type CommunitySignalStatus = z.infer<typeof communitySignalStatusSchema>;
+
+export const communitySignals = pgTable("community_signals", {
+  id: serial("id").primaryKey(),
+  signalType: varchar("signal_type", { length: 32 }).notNull(),
+  // Den abstrakte regelen — universell, anonymisert.
+  // F.eks. "Når noen sier 'kan du sende meg X innen Y' → fang som aksjon."
+  pattern: text("pattern").notNull(),
+  // Anonymisert eksempel-utdrag fra transkriptet (uten PII).
+  evidence: text("evidence"),
+  // candidate (samles, ikke aktiv) → canary (testes på små % av kall) → promoted (full live) → demoted (lav kvalitet, deaktivert)
+  status: varchar("status", { length: 16 }).notNull().default("candidate"),
+  // Hvor mange unike brukere har bidratt til dette mønsteret
+  contributors: integer("contributors").notNull().default(1),
+  // Outcome-tracking under canary/promoted-fase
+  canaryHits: integer("canary_hits").notNull().default(0),
+  canaryWins: integer("canary_wins").notNull().default(0),
+  canaryLosses: integer("canary_losses").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type CommunitySignal = typeof communitySignals.$inferSelect;
+export const insertCommunitySignalSchema = createInsertSchema(communitySignals).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertCommunitySignal = z.infer<typeof insertCommunitySignalSchema>;

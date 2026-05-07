@@ -955,6 +955,22 @@ Fremgangsmåte:
         ? `\n\nLÆRTE BRUKERPREFERANSER (basert på brukerens tidligere aksept/avvisning av forslag – følg disse nøye):\n${aiPrefs.profileText}`
         : "";
 
+      // Last globale fang-regler fra fellesskapet (anonymiserte mønstre lært
+      // på tvers av brukere). Canary = under utprøving, promoted = stabil.
+      // Personlig profil overstyrer hvis konflikt.
+      const allCommunity = await storage.getCommunitySignals();
+      const activeRules = allCommunity.filter(s => s.status === "canary" || s.status === "promoted").slice(0, 25);
+      const communityRulesSection = activeRules.length > 0
+        ? `\n\nGLOBALE FANG-REGLER FRA FELLESSKAPET (anonymiserte mønstre lært av andre brukere – bruk dem som universelle hint, men la BRUKERENS personlige preferanser overstyre ved konflikt):\n${activeRules.map((r, i) => `${i + 1}. ${r.pattern}`).join("\n")}`
+        : "";
+
+      // Track at disse reglene ble "vist" — for kvalitetsgrading
+      if (activeRules.length > 0) {
+        Promise.all(activeRules.map(r =>
+          storage.updateCommunitySignal(r.id, { canaryHits: r.canaryHits + 1 })
+        )).catch(err => console.error("Hit-tracking failed:", err.message));
+      }
+
       // Build context strings for existing items (for deduplication)
       const existingActionsContext = existingActions && existingActions.length > 0
         ? `\nEKSISTERENDE AKSJONSPUNKTER (allerede registrert i møtet – oppdater disse fremfor å lage nye):\n` +
@@ -998,7 +1014,7 @@ Fremgangsmåte:
       
       // If we have rules, use combined analysis prompt
       if (hasRules) {
-        const combinedSystemPrompt = `${expertPrompt}${preferencesSection}
+        const combinedSystemPrompt = `${expertPrompt}${preferencesSection}${communityRulesSection}
 
 Du har TRE oppgaver:
 
@@ -1201,7 +1217,7 @@ ${transcript}`;
         }
       } else {
         // Original behavior without rules
-        const systemPrompt = `${expertPrompt}${preferencesSection}
+        const systemPrompt = `${expertPrompt}${preferencesSection}${communityRulesSection}
 
 Du har TO oppgaver:
 
@@ -1791,6 +1807,65 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
   }
 
   // POST /api/feedback - log action/decision accept/reject signal
+  // Anonymiser et signal før det går inn i kollektiv pott. Bruker GPT-4o-mini
+  // for å fjerne navn/prosjekt/sted og abstrahere mønsteret. Returnerer null
+  // hvis signalet er for spesifikt eller anonymisering feiler.
+  async function anonymizeAndContribute(opts: {
+    type: "missed_action" | "missed_decision";
+    actionText: string;
+    transcriptContext: string;
+  }): Promise<void> {
+    try {
+      if (!opts.transcriptContext || opts.transcriptContext.length < 30) return;
+      const resp = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Du anonymiserer signaler fra et møtereferat-system for kollektiv læring.
+
+Du får (a) en aksjon eller beslutning brukeren la til manuelt, og (b) transkriptutdraget AI-en så på det tidspunktet. AI-en misset altså signalet — vi bygger en regel som universell fang-regel.
+
+Oppgaver:
+1. Fjern ALL personlig informasjon: navn (erstatt med [PERSON_A], [PERSON_B]), prosjektnavn → [PROSJEKT], kunde → [KUNDE], sted → [STED], bedrift → [BEDRIFT], spesifikke datoer → [DATO], spesifikke tall som identifiserer → [TALL].
+2. Identifiser det ABSTRAKTE FANG-MØNSTERET: hvilken type ytring/frase/struktur signaliserte dette? Skriv en konkret universell regel.
+3. Hvis signalet er FOR SPESIFIKT til én bruker/bedrift (f.eks. "alltid fang når noen nevner [PROSJEKT-X]"), returner { skip: true }.
+
+Returner JSON:
+{
+  "skip": false,
+  "pattern": "Universal fang-regel, f.eks. 'Når noen sier kan du sende meg [TING] innen [TID] → fang som aksjon med ansvarlig=mottaker'",
+  "evidence": "Anonymisert utdrag fra transkriptet som demonstrerer mønsteret"
+}`,
+          },
+          {
+            role: "user",
+            content: `Brukerens manuelle tillegg: "${opts.actionText}"\n\nTranskript-kontekst (det AI-en så):\n${opts.transcriptContext.slice(0, 2000)}`,
+          },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 500,
+        temperature: 0.2,
+      });
+      const content = resp.choices[0]?.message?.content;
+      if (!content) return;
+      const parsed = JSON.parse(content);
+      if (parsed.skip || !parsed.pattern) return;
+      await storage.createCommunitySignal({
+        signalType: opts.type,
+        pattern: String(parsed.pattern).slice(0, 800),
+        evidence: parsed.evidence ? String(parsed.evidence).slice(0, 1000) : null,
+        status: "candidate",
+        contributors: 1,
+        canaryHits: 0,
+        canaryWins: 0,
+        canaryLosses: 0,
+      });
+    } catch (err: any) {
+      console.error("Anonymize-contribute failed (non-fatal):", err.message);
+    }
+  }
+
   app.post("/api/feedback", requireAuth, async (req, res) => {
     const userId = getUserId(req);
     try {
@@ -1801,6 +1876,47 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
       await storage.logFeedback(userId, { type, text, context, accepted, reason, expertRole, source });
       // Trigger async profile update after every signal (non-blocking)
       updateAiProfile(userId).catch(console.error);
+
+      // Outcome-tracking for community-canary-regler: når en AI-forslått aksjon
+      // godkjennes/avvises, oppdater alle aktive canary-regler. Crude men
+      // konvergerer over tid — promotes/demotes basert på vinnerrate.
+      if (source !== "manual") {
+        (async () => {
+          const all = await storage.getCommunitySignals({ status: "canary" });
+          for (const r of all) {
+            if (accepted) {
+              await storage.updateCommunitySignal(r.id, { canaryWins: r.canaryWins + 1 });
+            } else {
+              await storage.updateCommunitySignal(r.id, { canaryLosses: r.canaryLosses + 1 });
+            }
+            // Auto-promote/demote etter ~30 hits
+            const total = r.canaryWins + r.canaryLosses + 1;
+            if (total >= 30) {
+              const winRate = (accepted ? r.canaryWins + 1 : r.canaryWins) / total;
+              if (winRate >= 0.7) await storage.updateCommunitySignal(r.id, { status: "promoted" });
+              else if (winRate < 0.4) await storage.updateCommunitySignal(r.id, { status: "demoted" });
+            }
+          }
+        })().catch(err => console.error("Outcome-tracking failed:", err.message));
+      }
+
+      // Bidra til kollektiv læring hvis (a) det er et manuelt tillegg, (b)
+      // brukeren har ikke opt-out, (c) vi har transkript-kontekst.
+      if (source === "manual" && context && (type === "action" || type === "decision")) {
+        const prefs = await storage.getAiPreferences(userId);
+        if (!prefs?.communityOptOut) {
+          // Async, best-effort
+          (async () => {
+            await anonymizeAndContribute({
+              type: type === "action" ? "missed_action" : "missed_decision",
+              actionText: text,
+              transcriptContext: context,
+            });
+            await storage.incrementCommunityContributions(userId);
+          })().catch(err => console.error("Community contribution failed:", err.message));
+        }
+      }
+
       res.json({ ok: true });
     } catch (err: any) {
       console.error("Error logging feedback:", err.message);
@@ -2762,6 +2878,124 @@ IKKE beskriv UI-elementer som menyer eller knapper med mindre de er relevante fo
       await storage.deleteMeetingScreenshot(userId, id);
       res.json({ success: true });
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============= Kollektiv læring (anonymisert, opt-out) =============
+  // Hver gang en bruker manuelt legger til en aksjon eller beslutning, er
+  // det et signal AI-en misset. Vi anonymiserer det og bygger en pott av
+  // universelle fang-regler som alle brukere drar nytte av.
+
+  app.get("/api/community/preferences", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const prefs = await storage.getAiPreferences(userId);
+      res.json({
+        optOut: prefs?.communityOptOut ?? false,
+        contributions: prefs?.communityContributions ?? 0,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/community/preferences", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const optOut = !!req.body.optOut;
+      await storage.setCommunityOptOut(userId, optOut);
+      res.json({ ok: true, optOut });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/community/signals", requireAuth, async (req, res) => {
+    try {
+      const status = (req.query.status as string) || undefined;
+      const list = await storage.getCommunitySignals(status ? { status } : undefined);
+      res.json({ signals: list });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST /api/community/aggregate — syntesiserer candidate-signaler til
+  // universelle fang-regler. Promoterer top regler til canary-status.
+  app.post("/api/community/aggregate", requireAuth, async (req, res) => {
+    try {
+      const candidates = await storage.getCommunitySignals({ status: "candidate" });
+      if (candidates.length < 3) {
+        return res.json({ ok: true, message: "For få kandidater (<3) for syntese", processed: 0 });
+      }
+      const byType: Record<string, typeof candidates> = {};
+      for (const c of candidates) {
+        if (!byType[c.signalType]) byType[c.signalType] = [];
+        byType[c.signalType].push(c);
+      }
+      let promoted = 0;
+      for (const [signalType, group] of Object.entries(byType)) {
+        if (group.length < 3) continue;
+        const synthResp = await openai.chat.completions.create({
+          model: "gpt-4.1",
+          messages: [
+            {
+              role: "system",
+              content: `Du syntesiserer mønstre fra ulike brukeres anonymiserte signaler til universelle fang-regler for et møtereferat-system.
+
+Du får N kandidater med mønstre + anonymiserte eksempler. Identifiser de TOP 3-5 mest universelle og handlingsorienterte reglene. Slå sammen duplikater. Forkast mønstre som er for spesifikke til én bruker eller bedrift.
+
+Returner JSON:
+{
+  "rules": [
+    {
+      "pattern": "Når noen sier 'kan du sjekke X' → fang som aksjon (X som oppgave, ansvarlig=mottaker)",
+      "evidence": "anonymisert eksempel som er bredt anvendelig"
+    }
+  ]
+}
+
+Vær konkret og handlingsorientert. Generelle regler som "fang flere aksjoner" er verdiløse.`,
+            },
+            {
+              role: "user",
+              content: `Signal-type: ${signalType}\n\nKandidater (${group.length}):\n${group.slice(0, 25).map((c, i) => `${i + 1}. Mønster: ${c.pattern}\n   Eksempel: ${c.evidence ?? "(ingen)"}\n   Bidragsytere: ${c.contributors}`).join("\n\n")}`,
+            },
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 1500,
+          temperature: 0.3,
+        });
+        const content = synthResp.choices[0]?.message?.content;
+        if (!content) continue;
+        try {
+          const parsed = JSON.parse(content);
+          const rules = parsed.rules || [];
+          for (const r of rules) {
+            if (!r.pattern) continue;
+            await storage.createCommunitySignal({
+              signalType,
+              pattern: r.pattern,
+              evidence: r.evidence ?? null,
+              status: "canary",
+              contributors: group.length,
+              canaryHits: 0,
+              canaryWins: 0,
+              canaryLosses: 0,
+            });
+            promoted++;
+          }
+          for (const c of group) {
+            await storage.updateCommunitySignal(c.id, { status: "demoted" });
+          }
+        } catch (e) {
+          console.error("Synth parse error:", e);
+        }
+      }
+      res.json({ ok: true, promoted, processedCandidates: candidates.length });
+    } catch (error: any) {
+      console.error("Aggregate error:", error);
       res.status(500).json({ error: error.message });
     }
   });
