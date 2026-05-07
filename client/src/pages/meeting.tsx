@@ -1151,6 +1151,13 @@ export default function MeetingPage() {
     toast({ title: "Beslutning bekreftet" });
   };
 
+  // Henter siste ~20 transkript-segmenter som kontekst for læring når bruker
+  // legger til noe manuelt. Tanken er: AI-en så denne teksten men foreslo
+  // ikke det brukeren ville ha — server kan analysere "hva burde jeg fanget"
+  const getRecentTranscriptContext = (): string => {
+    return transcript.slice(-20).map(s => s.text).join(" ").trim();
+  };
+
   const inlineAddAction = (fields: { text: string; owner: string; deadline: string }) => {
     if (!fields.text.trim()) return;
     const newAction: ActionItem = {
@@ -1166,8 +1173,18 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedActions(prev => [...prev, newAction]);
-    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
-    toast({ title: "Aksjon lagt til" });
+    authFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "action",
+        text: newAction.text,
+        accepted: true,
+        source: "manual",
+        context: getRecentTranscriptContext(),
+      }),
+    }).catch(console.error);
+    toast({ title: "Aksjon lagt til", description: "AI lærer av tilfeller den misset" });
   };
 
   const inlineAddDecision = (fields: { text: string; owner: string; context: string }) => {
@@ -1184,8 +1201,18 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedDecisions(prev => [...prev, newDecision]);
-    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
-    toast({ title: "Beslutning lagt til" });
+    authFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "decision",
+        text: newDecision.text,
+        context: getRecentTranscriptContext() + (fields.context.trim() ? `\n[Brukerens egen kontekst: ${fields.context.trim()}]` : ""),
+        accepted: true,
+        source: "manual",
+      }),
+    }).catch(console.error);
+    toast({ title: "Beslutning lagt til", description: "AI lærer av tilfeller den misset" });
   };
 
   // Manual add handlers
@@ -1204,12 +1231,22 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedActions(prev => [...prev, newAction]);
-    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "action",
+        text: newAction.text,
+        accepted: true,
+        source: "manual",
+        context: getRecentTranscriptContext(),
+      }),
+    }).catch(console.error);
     setAddActionText("");
     setAddActionOwner("");
     setAddActionDeadline("");
     setShowAddAction(false);
-    toast({ title: "Aksjon lagt til", description: "Manuelt aksjonspunkt er lagt til listen" });
+    toast({ title: "Aksjon lagt til", description: "AI lærer av tilfeller den misset" });
   };
 
   const addDecisionManually = () => {
@@ -1226,12 +1263,22 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedDecisions(prev => [...prev, newDecision]);
-    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "decision",
+        text: newDecision.text,
+        context: getRecentTranscriptContext() + (addDecisionContext.trim() ? `\n[Brukerens egen kontekst: ${addDecisionContext.trim()}]` : ""),
+        accepted: true,
+        source: "manual",
+      }),
+    }).catch(console.error);
     setAddDecisionText("");
     setAddDecisionContext("");
     setAddDecisionOwner("");
     setShowAddDecision(false);
-    toast({ title: "Beslutning lagt til", description: "Manuell beslutning er lagt til listen" });
+    toast({ title: "Beslutning lagt til", description: "AI lærer av tilfeller den misset" });
   };
 
   const submitSummaryFeedback = async () => {
