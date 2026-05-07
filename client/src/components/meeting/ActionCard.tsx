@@ -238,7 +238,7 @@ export function ActionCard({
             placeholder="Aksjonspunkt"
             className="h-9 text-sm font-medium"
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="relative">
               <UserCircle2 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <Input

@@ -39,19 +39,19 @@ export function MeetingTopbar({
 }: Props) {
   return (
     <header className="shrink-0 border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-      <div className="flex items-center gap-3 px-4 py-2.5 sm:px-6">
-        {/* Title input */}
+      <div className="flex items-center gap-2 sm:gap-3 px-3 py-2 sm:px-6 sm:py-2.5">
+        {/* Title input — full bredde på mobil, capped på desktop */}
         <Input
           value={title}
           onChange={(e) => onTitleChange(e.target.value)}
           placeholder="Møtetittel…"
-          className="border-0 bg-transparent px-0 h-9 font-display text-lg sm:text-xl font-semibold tracking-tightish focus-visible:ring-0 focus-visible:ring-offset-0 max-w-md min-w-0"
+          className="border-0 bg-transparent px-0 h-9 font-display text-base sm:text-xl font-semibold tracking-tightish focus-visible:ring-0 focus-visible:ring-offset-0 sm:max-w-md min-w-0 flex-1"
         />
 
-        {/* Timer */}
-        <div className="hidden sm:flex items-center gap-1.5 text-muted-foreground shrink-0">
+        {/* Timer kompakt på mobil med kun klokke-ikon */}
+        <div className="flex items-center gap-1 text-muted-foreground shrink-0">
           <Clock className="h-3.5 w-3.5" />
-          <span className="font-mono text-sm tabular-nums">{formatTime(elapsedSeconds)}</span>
+          <span className="font-mono text-xs sm:text-sm tabular-nums">{formatTime(elapsedSeconds)}</span>
         </div>
 
         {isRecording ? <LiveIndicator label="Tar opp" /> : null}

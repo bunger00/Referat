@@ -67,10 +67,10 @@ export function MeetingBottombar({
 
         <div className="flex-1" />
 
-        {/* Settings */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end">
+        {/* Settings — kompaktere på mobil for å unngå overflow */}
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2 justify-end">
           <Select value={expertRole} onValueChange={(v) => onExpertRoleChange(v as ExpertRole)}>
-            <SelectTrigger className="h-9 w-[140px] sm:w-[160px] text-xs gap-1.5 bg-background">
+            <SelectTrigger className="h-10 sm:h-9 w-[110px] sm:w-[160px] text-xs gap-1.5 bg-background">
               <Brain className="h-3.5 w-3.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -87,7 +87,7 @@ export function MeetingBottombar({
             value={String(questionInterval)}
             onValueChange={(v) => onQuestionIntervalChange(Number(v))}
           >
-            <SelectTrigger className="h-9 w-[100px] sm:w-[120px] text-xs gap-1.5 bg-background">
+            <SelectTrigger className="h-10 sm:h-9 w-[90px] sm:w-[120px] text-xs gap-1.5 bg-background">
               <Timer className="h-3.5 w-3.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>

@@ -38,7 +38,7 @@ export function MobileNav() {
             <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 p-0 bg-sidebar text-sidebar-foreground">
+        <SheetContent side="left" className="w-[85vw] max-w-xs sm:w-72 p-0 bg-sidebar text-sidebar-foreground">
           <div className="px-6 pt-7 pb-6">
             <div className="inline-flex items-center gap-2.5">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground">

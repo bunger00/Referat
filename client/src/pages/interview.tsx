@@ -454,7 +454,7 @@ export default function InterviewPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Intervju-tittel…"
-            className="border-0 bg-transparent px-0 h-9 font-display text-lg sm:text-xl font-semibold tracking-tightish focus-visible:ring-0 focus-visible:ring-offset-0 max-w-md min-w-0"
+            className="border-0 bg-transparent px-0 h-9 font-display text-base sm:text-xl font-semibold tracking-tightish focus-visible:ring-0 focus-visible:ring-offset-0 sm:max-w-md min-w-0 flex-1"
           />
           <div className="hidden sm:flex items-center gap-1.5 text-muted-foreground shrink-0">
             <Clock className="h-3.5 w-3.5" />

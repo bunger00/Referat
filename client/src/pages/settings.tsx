@@ -59,11 +59,19 @@ export default function SettingsPage() {
       />
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 sm:w-auto sm:inline-flex">
-          <TabsTrigger value="profile" className="gap-2"><UserIcon className="h-4 w-4" /> Profil</TabsTrigger>
-          <TabsTrigger value="ai" className="gap-2"><Sparkles className="h-4 w-4" /> AI</TabsTrigger>
-          <TabsTrigger value="transcribe" className="gap-2"><Mic2 className="h-4 w-4" /> Transkribering</TabsTrigger>
-          <TabsTrigger value="summary" className="gap-2"><ScrollText className="h-4 w-4" /> Referat</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-4 sm:w-auto sm:inline-flex">
+          <TabsTrigger value="profile" className="gap-1.5 text-xs sm:text-sm">
+            <UserIcon className="h-4 w-4" /><span className="hidden sm:inline">Profil</span>
+          </TabsTrigger>
+          <TabsTrigger value="ai" className="gap-1.5 text-xs sm:text-sm">
+            <Sparkles className="h-4 w-4" /><span>AI</span>
+          </TabsTrigger>
+          <TabsTrigger value="transcribe" className="gap-1.5 text-xs sm:text-sm">
+            <Mic2 className="h-4 w-4" /><span className="sm:hidden">Lyd</span><span className="hidden sm:inline">Transkribering</span>
+          </TabsTrigger>
+          <TabsTrigger value="summary" className="gap-1.5 text-xs sm:text-sm">
+            <ScrollText className="h-4 w-4" /><span>Referat</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile"><ProfileTab /></TabsContent>
