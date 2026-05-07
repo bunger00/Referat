@@ -22,15 +22,15 @@ async function parsePdf(dataBuffer: Buffer): Promise<{ text: string }> {
     const pdfParse: PdfParseFn = (pdfParseModule as any).default ?? pdfParseModule;
     
     if (typeof pdfParse !== "function") {
-      console.error("pdf-parse module structure:", Object.keys(pdfParseModule));
+      logger.error("pdf-parse module structure:", Object.keys(pdfParseModule));
       throw new Error("pdf-parse eksporterer ikke en funksjon");
     }
     
     const result = await pdfParse(dataBuffer);
-    console.log("PDF parsed successfully, pages:", result.numpages, "text length:", result.text?.length);
+    logger.info("PDF parsed successfully, pages:", result.numpages, "text length:", result.text?.length);
     return { text: result.text || "" };
   } catch (error: any) {
-    console.error("PDF parse error:", error.message, error.stack);
+    logger.error("PDF parse error:", error.message, error.stack);
     throw new Error(`PDF-parsing feilet: ${error.message}`);
   }
 }
@@ -119,7 +119,7 @@ async function transcribeWithNbWhisper(audioBuffer: Buffer, model: "medium" | "l
     }
     // Fallback: retry as raw binary if JSON format is rejected by the endpoint
     if (response.status === 400 || response.status === 422) {
-      console.log(`nb-whisper-${model}: JSON format avvist (${response.status}), prøver rå binær...`);
+      logger.info(`nb-whisper-${model}: JSON format avvist (${response.status}), prøver rå binær...`);
       return transcribeWithNbWhisperRaw(audioBuffer, model, apiKey);
     }
     throw new Error(`HuggingFace endpoint-feil: ${response.status} – ${errorText}`);
@@ -226,18 +226,18 @@ async function pingNbWhisperEndpoints() {
       if (status === 400) {
         const body = await res.text();
         if (body.includes("is paused") || body.includes("paused, ask a maintainer")) {
-          console.warn(`Keep-alive nb-whisper-${model}: ENDEPUNKT PAUSET — start det på https://endpoints.huggingface.co/`);
+          logger.warn(`Keep-alive nb-whisper-${model}: ENDEPUNKT PAUSET — start det på https://endpoints.huggingface.co/`);
           continue;
         }
         consecutiveLoading[model] = 0;
-        console.log(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (400 = empty body avvist)`);
+        logger.info(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (400 = empty body avvist)`);
       } else if (status === 200 || status === 422) {
         consecutiveLoading[model] = 0;
-        console.log(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (${status})`);
+        logger.info(`Keep-alive nb-whisper-${model}: endepunkt er aktivt (${status})`);
       } else if (status === 503) {
-        console.log(`Keep-alive nb-whisper-${model}: starter opp (503)...`);
+        logger.info(`Keep-alive nb-whisper-${model}: starter opp (503)...`);
       } else {
-        console.log(`Keep-alive nb-whisper-${model}: uventet status ${status}`);
+        logger.info(`Keep-alive nb-whisper-${model}: uventet status ${status}`);
       }
     } catch {
       // Ignore keep-alive errors
@@ -268,7 +268,7 @@ async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | 
     const result = await transcribeWithNbWhisper(audioBuffer, model);
     consecutiveLoading[model] = 0;
     if (hasTranscriptionContent(result)) {
-      console.log(`Transkribert med nb-whisper-${model}`);
+      logger.info(`Transkribert med nb-whisper-${model}`);
     }
     return { ...result, engine: `nb-whisper-${model}` };
   } catch (err: any) {
@@ -281,14 +281,14 @@ async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | 
     }
     if (err.message === "ENDPOINT_LOADING") {
       consecutiveLoading[model] = (consecutiveLoading[model] ?? 0) + 1;
-      console.log(`nb-whisper-${model} laster opp (${consecutiveLoading[model]} chunks ventende) — returnerer tom for denne chunken`);
+      logger.info(`nb-whisper-${model} laster opp (${consecutiveLoading[model]} chunks ventende) — returnerer tom for denne chunken`);
       // Don't fall back — return empty so the user keeps recording while the
       // endpoint warms up. Subsequent chunks will succeed once it's ready.
       return { text: "", engine: `nb-whisper-${model}`, status: "loading" };
     }
     // Hard errors (timeout, network, model error) — surface to client with model context.
     const isSlow = err.message?.includes("for lang tid");
-    console.error(`nb-whisper-${model} feil:`, isSlow ? "timeout" : err.message);
+    logger.error(`nb-whisper-${model} feil:`, isSlow ? "timeout" : err.message);
     throw err;
   }
 }
@@ -481,7 +481,7 @@ const uploadAudioFile = multer({
     if (isAudioMime || isAllowedExt) {
       cb(null, true);
     } else {
-      console.log("Rejected file:", file.originalname, "mimetype:", file.mimetype);
+      logger.info("Rejected file:", file.originalname, "mimetype:", file.mimetype);
       cb(new Error("Bare lydfiler er tillatt (mp3, m4a, wav, webm, ogg, flac)"));
     }
   },
@@ -497,7 +497,7 @@ export async function registerRoutes(
   // Start HuggingFace keep-alive pings
   pingNbWhisperEndpoints(); // ping immediately on startup
   setInterval(pingNbWhisperEndpoints, KEEPALIVE_INTERVAL_MS);
-  console.log(`nb-whisper keep-alive startet (hvert ${KEEPALIVE_INTERVAL_MS / 60000} minutt)`);
+  logger.info(`nb-whisper keep-alive startet (hvert ${KEEPALIVE_INTERVAL_MS / 60000} minutt)`);
 
   // ============= PROTECTED ROUTES =============
   // Auth is handled by Supabase. Frontend does signup/login/oauth/logout via
@@ -628,7 +628,7 @@ export async function registerRoutes(
       });
 
     } catch (error: any) {
-      console.error("Transkripsjonsfeil:", error);
+      logger.error("Transkripsjonsfeil:", error);
       // Paused endpoint is actionable — surface a 503 with code so client can show a clear banner.
       if (error?.code === "ENDPOINT_PAUSED") {
         return res.status(503).json({
@@ -657,12 +657,12 @@ export async function registerRoutes(
     // Use ffmpeg to split into chunks (convert to mp3 for smaller size and consistency)
     const cmd = `ffmpeg -i "${inputPath}" -f segment -segment_time ${chunkDurationSeconds} -c:a libmp3lame -q:a 4 "${chunkPattern}" -y 2>&1`;
     
-    console.log("Splitting audio with ffmpeg:", cmd);
+    logger.info("Splitting audio with ffmpeg:", cmd);
     
     try {
       await execAsync(cmd, { maxBuffer: 50 * 1024 * 1024 });
     } catch (error: any) {
-      console.error("ffmpeg error:", error.message);
+      logger.error("ffmpeg error:", error.message);
       throw new Error("Kunne ikke dele opp lydfilen");
     }
     
@@ -673,7 +673,7 @@ export async function registerRoutes(
       .sort()
       .map(f => path.join(outputDir, f));
     
-    console.log(`Created ${chunks.length} audio chunks`);
+    logger.info(`Created ${chunks.length} audio chunks`);
     return chunks;
   };
 
@@ -701,7 +701,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Ingen lydfil lastet opp" });
       }
 
-      console.log("Transcribe file: Received file", req.file.originalname, "size:", req.file.size);
+      logger.info("Transcribe file: Received file", req.file.originalname, "size:", req.file.size);
 
       // Filter out only clear hallucinations (not legitimate short words)
       const hallucinationPatterns = [
@@ -737,11 +737,11 @@ export async function registerRoutes(
       let totalDuration = 0;
       
       if (needsSplitting) {
-        console.log("File is large, splitting into chunks...");
+        logger.info("File is large, splitting into chunks...");
         
         // Get total duration first
         totalDuration = await getAudioDuration(req.file.path);
-        console.log("Total audio duration:", totalDuration, "seconds");
+        logger.info("Total audio duration:", totalDuration, "seconds");
         
         // Split into 5-minute chunks (300 seconds) for manageable size
         const chunks = await splitAudioFile(req.file.path, 300);
@@ -765,7 +765,7 @@ export async function registerRoutes(
       for (let i = 0; i < filesToTranscribe.length; i++) {
         const { path: filePath, offsetSeconds } = filesToTranscribe[i];
         
-        console.log(`Transcribing chunk ${i + 1}/${filesToTranscribe.length} (offset: ${offsetSeconds}s)...`);
+        logger.info(`Transcribing chunk ${i + 1}/${filesToTranscribe.length} (offset: ${offsetSeconds}s)...`);
         
         // Read the file
         const audioBuffer = fs.readFileSync(filePath);
@@ -773,7 +773,7 @@ export async function registerRoutes(
         // Transcribe with NbAiLab nb-whisper (Nasjonalbiblioteket)
         const transcription = await transcribeAudio(audioBuffer);
 
-        console.log(`Chunk ${i + 1} transcribed, chunks:`, transcription.chunks?.length || 0);
+        logger.info(`Chunk ${i + 1} transcribed, chunks:`, transcription.chunks?.length || 0);
 
         if (transcription.text && transcription.text.trim() && !isHallucination(transcription.text)) {
           // HF returns chunks: [{timestamp: [start, end], text}]
@@ -828,14 +828,14 @@ export async function registerRoutes(
       try {
         fs.unlinkSync(req.file.path);
       } catch (e) {
-        console.warn("Could not delete original file:", e);
+        logger.warn("Could not delete original file:", e);
       }
       
       for (const chunk of chunkFiles) {
         try {
           fs.unlinkSync(chunk);
         } catch (e) {
-          console.warn("Could not delete chunk file:", e);
+          logger.warn("Could not delete chunk file:", e);
         }
       }
 
@@ -844,7 +844,7 @@ export async function registerRoutes(
       const durationSeconds = Math.floor(totalDuration % 60);
       const durationString = `${durationMinutes}:${String(durationSeconds).padStart(2, "0")}`;
 
-      console.log(`Transcription complete: ${segments.length} segments, duration: ${durationString}`);
+      logger.info(`Transcription complete: ${segments.length} segments, duration: ${durationString}`);
 
       res.json({ 
         segments,
@@ -854,7 +854,7 @@ export async function registerRoutes(
       });
 
     } catch (error: any) {
-      console.error("Transcribe file error:", error);
+      logger.error("Transcribe file error:", error);
       
       // Clean up all files on error
       if (req.file?.path) {
@@ -932,7 +932,7 @@ Fremgangsmåte:
 
       res.json({ segments: result });
     } catch (error: any) {
-      console.error("Clean transcript error:", error);
+      logger.error("Clean transcript error:", error);
       res.status(500).json({ error: "Kunne ikke rense transkript", details: error.message });
     }
   });
@@ -1019,7 +1019,7 @@ Returner tom array hvis ingen beslutninger ble tatt.`;
         return [];
       }
     } catch (err: any) {
-      console.error("Dedicated decisions extraction failed:", err.message);
+      logger.error("Dedicated decisions extraction failed:", err.message);
       return [];
     }
   }
@@ -1038,9 +1038,9 @@ Returner tom array hvis ingen beslutninger ble tatt.`;
       const { transcript, fullTranscript, expertRole, existingActions, existingDecisions, seriesSummaries, sessionId, seriesId } = parsed.data;
       const role = expertRole || "bygg";
       
-      console.log("Analyze request - expert role:", role);
-      console.log("Analyze request - recent transcript length:", transcript?.length || 0);
-      console.log("Analyze request - full transcript length:", fullTranscript?.length || 0);
+      logger.info("Analyze request - expert role:", role);
+      logger.info("Analyze request - recent transcript length:", transcript?.length || 0);
+      logger.info("Analyze request - full transcript length:", fullTranscript?.length || 0);
 
       // Load learned preferences
       const aiPrefs = await storage.getAiPreferences(userId);
@@ -1061,7 +1061,7 @@ Returner tom array hvis ingen beslutninger ble tatt.`;
       if (activeRules.length > 0) {
         Promise.all(activeRules.map(r =>
           storage.updateCommunitySignal(r.id, { canaryHits: r.canaryHits + 1 })
-        )).catch(err => console.error("Hit-tracking failed:", err.message));
+        )).catch(err => logger.error("Hit-tracking failed:", err.message));
       }
 
       // Build context strings for existing items (for deduplication)
@@ -1095,7 +1095,7 @@ Returner tom array hvis ingen beslutninger ble tatt.`;
         : "";
 
       if (!transcript || transcript.trim().length === 0) {
-        console.log("Analyze: Empty transcript, returning empty questions");
+        logger.info("Analyze: Empty transcript, returning empty questions");
         return res.json({ questions: [], warnings: [], crossMeetingQuestions: [] });
       }
       
@@ -1314,10 +1314,10 @@ ${transcript}`;
         ]);
 
         const content = response.choices[0]?.message?.content;
-        console.log("GPT response with rules:", content?.substring(0, 500), "| dedicated decisions:", dedicatedDecisions.length);
+        logger.info("GPT response with rules:", content?.substring(0, 500), "| dedicated decisions:", dedicatedDecisions.length);
 
         if (!content) {
-          console.log("Analyze: No content from GPT");
+          logger.info("Analyze: No content from GPT");
           return res.json({ questions: [], warnings: [] });
         }
 
@@ -1348,7 +1348,7 @@ ${transcript}`;
             context: d.context || null,
           })));
 
-          console.log("Analyze with rules: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", warnings.length, "warnings,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisions.length, "+ dedicated unique:", decisions.length - mainDecisions.length, ")");
+          logger.info("Analyze with rules: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", warnings.length, "warnings,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisions.length, "+ dedicated unique:", decisions.length - mainDecisions.length, ")");
           res.json({ 
             questions: questions.slice(0, 3),
             crossMeetingQuestions: crossMeetingQuestions.slice(0, 3),
@@ -1357,7 +1357,7 @@ ${transcript}`;
             decisions,
           });
         } catch (parseError) {
-          console.error("JSON parsing error:", parseError);
+          logger.error("JSON parsing error:", parseError);
           return res.json({ questions: [], crossMeetingQuestions: [], warnings: [], actions: [] });
         }
       } else {
@@ -1504,10 +1504,10 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
 
         const content = response.choices[0]?.message?.content;
         const finishReason = response.choices[0]?.finish_reason;
-        console.log("GPT response:", content?.slice(0, 300), "finish:", finishReason, "| dedicated decisions:", dedicatedDecisionsList.length);
+        logger.info("GPT response:", content?.slice(0, 300), "finish:", finishReason, "| dedicated decisions:", dedicatedDecisionsList.length);
 
         if (!content) {
-          console.log("Analyze: No content from GPT");
+          logger.info("Analyze: No content from GPT");
           return res.json({ questions: [], warnings: [], actions: [] });
         }
 
@@ -1515,8 +1515,8 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
         try {
           result = JSON.parse(content);
         } catch (parseError) {
-          console.error("JSON parsing error:", parseError, "finish:", finishReason);
-          console.error("Raw content (first 500):", content.slice(0, 500));
+          logger.error("JSON parsing error:", parseError, "finish:", finishReason);
+          logger.error("Raw content (first 500):", content.slice(0, 500));
 
           // Hvis output ble truncated (finish_reason === "length"), prøv å reparere
           // ved å klippe til siste komplette objekt og lukke arrays/object-trær.
@@ -1524,7 +1524,7 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
           if (repaired) {
             try {
               result = JSON.parse(repaired);
-              console.log("Reparert truncated JSON OK");
+              logger.info("Reparert truncated JSON OK");
             } catch {
               /* fortsett til fallback */
             }
@@ -1537,7 +1537,7 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
               return res.json({ questions: fallbackQuestions, warnings: [], actions: [] });
             }
             // Returner tomme arrays heller enn 500 — bedre brukeropplevelse
-            console.warn("Analyze: ga opp parsing — returnerer tomt resultat");
+            logger.warn("Analyze: ga opp parsing — returnerer tomt resultat");
             return res.json({ questions: [], warnings: [], actions: [], decisions: [] });
           }
         }
@@ -1561,12 +1561,12 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
           context: d.context || null,
         })));
 
-        console.log("Analyze: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisionsW.length, "+ dedicated unique:", decisions.length - mainDecisionsW.length, ")");
+        logger.info("Analyze: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisionsW.length, "+ dedicated unique:", decisions.length - mainDecisionsW.length, ")");
         res.json({ questions: questions.slice(0, 3), crossMeetingQuestions: crossMeetingQuestions.slice(0, 3), warnings: [], actions, decisions });
       }
       
     } catch (error: any) {
-      console.error("Analysefeil:", error);
+      logger.error("Analysefeil:", error);
       res.status(500).json({ 
         error: "Kunne ikke analysere transkript", 
         details: error.message 
@@ -1643,14 +1643,14 @@ Hvis ingen advarsler: { "warnings": [] }`;
           isNew: true,
         }));
         
-        console.log("Rule check: Found", warnings.length, "warnings");
+        logger.info("Rule check: Found", warnings.length, "warnings");
         res.json({ warnings });
       } catch {
-        console.error("Rule check JSON parse error");
+        logger.error("Rule check JSON parse error");
         res.json({ warnings: [] });
       }
     } catch (error: any) {
-      console.error("Rule check error:", error.message);
+      logger.error("Rule check error:", error.message);
       res.json({ warnings: [] });
     }
   });
@@ -1850,7 +1850,7 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
       res.json({ summary });
       
     } catch (error: any) {
-      console.error("Sammendragsfeil:", error);
+      logger.error("Sammendragsfeil:", error);
       res.status(500).json({ 
         error: "Kunne ikke generere sammendrag", 
         details: error.message 
@@ -1925,10 +1925,10 @@ Vær SVÆRT konkret med signaler — generelle råd som "fang flere aksjoner" er
       const profileText = profileResponse.choices[0]?.message?.content || "";
       if (profileText) {
         await storage.setAiPreferences(userId, profileText, logs.length);
-        console.log("AI preferences updated, signal count:", logs.length, "manuelt lagt til:", manualAdds.length);
+        logger.info("AI preferences updated, signal count:", logs.length, "manuelt lagt til:", manualAdds.length);
       }
     } catch (err: any) {
-      console.error("Error updating AI profile:", err.message);
+      logger.error("Error updating AI profile:", err.message);
     }
   }
 
@@ -1979,11 +1979,11 @@ Vær SVÆRT spesifikk — vage instruksjoner er verdiløse. Bruk konkrete eksemp
       const profileText = profileResponse.choices[0]?.message?.content || "";
       if (profileText) {
         await storage.setSummaryPreferences(userId, profileText, feedbacks.length);
-        console.log("Summary preferences updated, feedback count:", feedbacks.length);
+        logger.info("Summary preferences updated, feedback count:", feedbacks.length);
       }
       return profileText;
     } catch (err: any) {
-      console.error("Error updating summary profile:", err.message);
+      logger.error("Error updating summary profile:", err.message);
       return "";
     }
   }
@@ -2044,7 +2044,7 @@ Returner JSON:
         canaryLosses: 0,
       });
     } catch (err: any) {
-      console.error("Anonymize-contribute failed (non-fatal):", err.message);
+      logger.error("Anonymize-contribute failed (non-fatal):", err.message);
     }
   }
 
@@ -2079,7 +2079,7 @@ Returner JSON:
               else if (winRate < 0.4) await storage.updateCommunitySignal(r.id, { status: "demoted" });
             }
           }
-        })().catch(err => console.error("Outcome-tracking failed:", err.message));
+        })().catch(err => logger.error("Outcome-tracking failed:", err.message));
       }
 
       // Bidra til kollektiv læring hvis (a) det er et manuelt tillegg, (b)
@@ -2095,13 +2095,13 @@ Returner JSON:
               transcriptContext: context,
             });
             await storage.incrementCommunityContributions(userId);
-          })().catch(err => console.error("Community contribution failed:", err.message));
+          })().catch(err => logger.error("Community contribution failed:", err.message));
         }
       }
 
       res.json({ ok: true });
     } catch (err: any) {
-      console.error("Error logging feedback:", err.message);
+      logger.error("Error logging feedback:", err.message);
       res.status(500).json({ error: "Kunne ikke lagre tilbakemelding" });
     }
   });
@@ -2119,7 +2119,7 @@ Returner JSON:
       updateSummaryProfile(userId).catch(console.error);
       res.json({ ok: true });
     } catch (err: any) {
-      console.error("Error logging summary feedback:", err.message);
+      logger.error("Error logging summary feedback:", err.message);
       res.status(500).json({ error: "Kunne ikke lagre referat-tilbakemelding" });
     }
   });
@@ -2184,7 +2184,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
       res.json({ ok: true, analysis: diffAnalysis, profileText: newProfileText });
     } catch (err: any) {
-      console.error("Error analyzing summary diff:", err.message);
+      logger.error("Error analyzing summary diff:", err.message);
       res.status(500).json({ error: "Kunne ikke analysere redigering" });
     }
   });
@@ -2208,7 +2208,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
         summaryLastUpdated: summaryPrefs?.updatedAt || null,
       });
     } catch (err: any) {
-      console.error("Error fetching learning profiles:", err.message);
+      logger.error("Error fetching learning profiles:", err.message);
       res.status(500).json({ error: "Kunne ikke hente læringsdata" });
     }
   });
@@ -2290,7 +2290,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
       }));
       res.json({ sessions: enriched });
     } catch (error: any) {
-      console.error("Feil ved henting av sesjoner:", error);
+      logger.error("Feil ved henting av sesjoner:", error);
       res.status(500).json({ error: "Kunne ikke hente sesjoner", details: error.message });
     }
   });
@@ -2311,7 +2311,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
       res.json({ session });
     } catch (error: any) {
-      console.error("Feil ved henting av sesjon:", error);
+      logger.error("Feil ved henting av sesjon:", error);
       res.status(500).json({ error: "Kunne ikke hente sesjon", details: error.message });
     }
   });
@@ -2332,7 +2332,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
       });
       res.json({ session });
     } catch (error: any) {
-      console.error("Feil ved oppretting av sesjon:", error);
+      logger.error("Feil ved oppretting av sesjon:", error);
       res.status(500).json({ error: "Kunne ikke opprette sesjon", details: error.message });
     }
   });
@@ -2369,7 +2369,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
       res.json({ session });
     } catch (error: any) {
-      console.error("Feil ved oppdatering av sesjon:", error);
+      logger.error("Feil ved oppdatering av sesjon:", error);
       res.status(500).json({ error: "Kunne ikke oppdatere sesjon", details: error.message });
     }
   });
@@ -2390,7 +2390,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
 
       res.json({ success: true });
     } catch (error: any) {
-      console.error("Feil ved sletting av sesjon:", error);
+      logger.error("Feil ved sletting av sesjon:", error);
       res.status(500).json({ error: "Kunne ikke slette sesjon", details: error.message });
     }
   });
@@ -2606,7 +2606,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
       }));
       return rules;
     } catch (e) {
-      console.error("Failed to parse rules JSON:", e);
+      logger.error({ err: e }, "Failed to parse rules JSON");
       return [];
     }
   }
@@ -2672,7 +2672,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
           rules: extractedRules,
         });
       } catch (err: any) {
-        console.error("Rule extraction error:", err);
+        logger.error("Rule extraction error:", err);
         await storage.updateDocumentStatus(userId, documentId, "error", 0, "Regelekstraksjon feilet");
         const state = await storage.getRulesState(userId);
         res.status(500).json({ 
@@ -2682,7 +2682,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
         });
       }
     } catch (error: any) {
-      console.error("Document upload error:", error);
+      logger.error("Document upload error:", error);
       res.status(500).json({ success: false, error: error.message || "Opplastingsfeil" });
     }
   });
@@ -2788,7 +2788,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
           rules: extractedRules,
         });
       } catch (err: any) {
-        console.error("Rule extraction from text error:", err);
+        logger.error("Rule extraction from text error:", err);
         await storage.updateDocumentStatus(userId, documentId, "error", 0, "Regelekstraksjon feilet");
         const stateAfter = await storage.getRulesState(userId);
         res.status(500).json({
@@ -2798,7 +2798,7 @@ Hvis dokumentet ikke inneholder klare regler eller krav, returner: { "rules": []
         });
       }
     } catch (error: any) {
-      console.error("Text rule extraction error:", error);
+      logger.error("Text rule extraction error:", error);
       res.status(500).json({ success: false, error: error.message || "Analysefeil" });
     }
   });
@@ -2907,7 +2907,7 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
 
       res.json({ success: true, document: doc });
     } catch (error: any) {
-      console.error("Meeting document upload error:", error);
+      logger.error("Meeting document upload error:", error);
       res.status(500).json({ success: false, error: error.message || "Opplasting feilet" });
     }
   });
@@ -2921,7 +2921,7 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
       const docs = await storage.getMeetingDocuments(userId, sessionId, seriesId);
       res.json({ documents: docs });
     } catch (error: any) {
-      console.error("Meeting document list error:", error);
+      logger.error("Meeting document list error:", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2934,7 +2934,7 @@ Maks 20 punkter. Vær presis og konkret. Skriv på norsk.`,
       const deleted = await storage.deleteMeetingDocument(userId, id);
       res.json({ success: deleted });
     } catch (error: any) {
-      console.error("Meeting document delete error:", error);
+      logger.error("Meeting document delete error:", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -2991,7 +2991,7 @@ IKKE beskriv UI-elementer som menyer eller knapper med mindre de er relevante fo
       const description = response.choices[0]?.message?.content?.trim() || "";
       res.json({ description });
     } catch (error: any) {
-      console.error("Screenshot analyze error:", error);
+      logger.error("Screenshot analyze error:", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -3172,12 +3172,12 @@ Vær konkret og handlingsorientert. Generelle regler som "fang flere aksjoner" e
             await storage.updateCommunitySignal(c.id, { status: "demoted" });
           }
         } catch (e) {
-          console.error("Synth parse error:", e);
+          logger.error({ err: e }, "Synth parse error");
         }
       }
       res.json({ ok: true, promoted, processedCandidates: candidates.length });
     } catch (error: any) {
-      console.error("Aggregate error:", error);
+      logger.error("Aggregate error:", error);
       res.status(500).json({ error: error.message });
     }
   });
