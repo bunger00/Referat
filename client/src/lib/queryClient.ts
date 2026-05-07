@@ -7,6 +7,20 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * fetch() med Supabase JWT automatisk lagt til som Authorization-header.
+ * Bruk denne for alle /api/... kall som ikke går gjennom apiRequest()
+ * (f.eks. fire-and-forget POST, FormData-uploads, eller når du må håndtere
+ * non-OK responses selv).
+ */
+export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const auth = await authHeaders();
+  return fetch(url, {
+    ...init,
+    headers: { ...auth, ...((init.headers as Record<string, string>) || {}) },
+  });
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;

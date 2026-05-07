@@ -82,7 +82,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import type { TranscriptSegment, Question, ActionItem, ProposedDecision, MeetingState, MeetingMeta, ExpertRole, Warning, ExtractedRule, UploadedDocument, SeriesSummary, MeetingSeriesRow, MeetingDocument, WordCorrection } from "@shared/schema";
 import { expertRoleLabels } from "@shared/schema";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, authFetch } from "@/lib/queryClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { marked } from "marked";
 import ReactMarkdown from "react-markdown";
@@ -398,7 +398,7 @@ export default function MeetingPage() {
 
       // Backfill: if localStorage has a summary for a saved session, push it to DB
       if (stored.sessionId && stored.summary) {
-        fetch(`/api/sessions/${stored.sessionId}`, {
+        authFetch(`/api/sessions/${stored.sessionId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -461,7 +461,7 @@ export default function MeetingPage() {
       lastRuleCheckRef.current = recentTranscript;
       
       try {
-        const response = await fetch("/api/check-rules", {
+        const response = await authFetch("/api/check-rules", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -675,7 +675,7 @@ export default function MeetingPage() {
           const mimeType = audioBlob.type;
 
           try {
-            const res = await fetch("/api/transcribe", {
+            const res = await authFetch("/api/transcribe", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "include",
@@ -772,7 +772,7 @@ export default function MeetingPage() {
       let freshSeriesSummaries: SeriesSummary[] | undefined;
       if (seriesId) {
         try {
-          const seriesRes = await fetch(`/api/series/${seriesId}/summaries`);
+          const seriesRes = await authFetch(`/api/series/${seriesId}/summaries`);
           if (seriesRes.ok) {
             const seriesData = await seriesRes.json();
             // Include all — the backend only returns sessions with saved summaries.
@@ -1006,7 +1006,7 @@ export default function MeetingPage() {
         ? { ...a, text: finalText, status: "approved" as const, owner: approvalOwner.trim() || undefined, deadline: approvalDeadline.trim() || undefined }
         : a
     ));
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: finalText, accepted: true, source: "ai" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: finalText, accepted: true, source: "ai" }) }).catch(console.error);
     setApprovingAction(null);
     setApprovalText("");
     setApprovalOwner("");
@@ -1023,10 +1023,10 @@ export default function MeetingPage() {
     if (!rejectTarget) return;
     const reason = rejectReason.trim();
     if (rejectTarget.type === "action") {
-      fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: rejectTarget.text, accepted: false, source: "ai", reason: reason || undefined }) }).catch(console.error);
+      authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: rejectTarget.text, accepted: false, source: "ai", reason: reason || undefined }) }).catch(console.error);
       setProposedActions(prev => prev.map(a => a.id === rejectTarget.id ? { ...a, status: "rejected" as const } : a));
     } else {
-      fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: rejectTarget.text, accepted: false, source: "ai", reason: reason || undefined }) }).catch(console.error);
+      authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: rejectTarget.text, accepted: false, source: "ai", reason: reason || undefined }) }).catch(console.error);
       setProposedDecisions(prev => prev.map(d => d.id === rejectTarget.id ? { ...d, status: "rejected" as const } : d));
     }
     setRejectTarget(null);
@@ -1051,7 +1051,7 @@ export default function MeetingPage() {
         ? { ...d, text: finalText, status: "confirmed" as const, confirmedAt: new Date().toISOString() }
         : d
     ));
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: finalText, context: confirmingDecision.context, accepted: true, source: "ai" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: finalText, context: confirmingDecision.context, accepted: true, source: "ai" }) }).catch(console.error);
     setConfirmingDecision(null);
     setConfirmingDecisionText("");
     toast({ title: "Beslutning bekreftet", description: "Beslutningen er lagt til beslutningslisten" });
@@ -1071,7 +1071,7 @@ export default function MeetingPage() {
         ? { ...a, text: finalText || a.text, status: "approved" as const, owner: edits.owner.trim() || undefined, deadline: edits.deadline.trim() || undefined }
         : a
     ));
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: finalText || "", accepted: true, source: "ai" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: finalText || "", accepted: true, source: "ai" }) }).catch(console.error);
     toast({ title: "Aksjon godkjent" });
   };
 
@@ -1083,7 +1083,7 @@ export default function MeetingPage() {
       context = d.context;
       return { ...d, text: finalText || d.text, status: "confirmed" as const, confirmedAt: new Date().toISOString() };
     }));
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: finalText || "", context, accepted: true, source: "ai" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: finalText || "", context, accepted: true, source: "ai" }) }).catch(console.error);
     toast({ title: "Beslutning bekreftet" });
   };
 
@@ -1102,7 +1102,7 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedActions(prev => [...prev, newAction]);
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
     toast({ title: "Aksjon lagt til" });
   };
 
@@ -1120,7 +1120,7 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedDecisions(prev => [...prev, newDecision]);
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
     toast({ title: "Beslutning lagt til" });
   };
 
@@ -1140,7 +1140,7 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedActions(prev => [...prev, newAction]);
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "action", text: newAction.text, accepted: true, source: "manual" }) }).catch(console.error);
     setAddActionText("");
     setAddActionOwner("");
     setAddActionDeadline("");
@@ -1162,7 +1162,7 @@ export default function MeetingPage() {
       createdAt: new Date().toISOString(),
     };
     setProposedDecisions(prev => [...prev, newDecision]);
-    fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
+    authFetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "decision", text: newDecision.text, context: newDecision.context, accepted: true, source: "manual" }) }).catch(console.error);
     setAddDecisionText("");
     setAddDecisionContext("");
     setAddDecisionOwner("");
@@ -1175,7 +1175,7 @@ export default function MeetingPage() {
     setIsSubmittingSummaryFeedback(true);
     try {
       const summaryExcerpt = meetingSummary ? meetingSummary.slice(0, 400) : undefined;
-      const res = await fetch("/api/feedback/summary", {
+      const res = await authFetch("/api/feedback/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commentText: summaryFeedbackText.trim(), summaryExcerpt }),
@@ -1217,7 +1217,7 @@ export default function MeetingPage() {
         // Run structured diff analysis and profile update (this is the "memory" system)
         // Do it async so we don't block the user — show a background toast
         setIsAnalyzingDiff(true);
-        fetch("/api/feedback/summary-diff", {
+        authFetch("/api/feedback/summary-diff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ original: originalSummary, edited: editedSummary, sessionTitle: targetTitle }),
@@ -1250,7 +1250,7 @@ export default function MeetingPage() {
     setShowLearningDialog(true);
     setIsLoadingLearning(true);
     try {
-      const res = await fetch("/api/learning/profiles");
+      const res = await authFetch("/api/learning/profiles");
       if (res.ok) {
         const data = await res.json();
         setLearningProfiles(data);
@@ -1806,7 +1806,7 @@ export default function MeetingPage() {
       let summarySeriesSummaries: SeriesSummary[] | undefined;
       if (seriesId) {
         try {
-          const seriesRes = await fetch(`/api/series/${seriesId}/summaries`);
+          const seriesRes = await authFetch(`/api/series/${seriesId}/summaries`);
           if (seriesRes.ok) {
             const seriesData = await seriesRes.json();
             // Exclude the current session (if it has a saved summary) to avoid self-reference
@@ -1880,7 +1880,7 @@ export default function MeetingPage() {
       const formData = new FormData();
       formData.append("audio", file);
       
-      const response = await fetch("/api/transcribe-file", {
+      const response = await authFetch("/api/transcribe-file", {
         method: "POST",
         credentials: "include",
         body: formData,
@@ -2000,7 +2000,7 @@ export default function MeetingPage() {
     if (seriesId) params.set("seriesId", String(seriesId));
     if (!sessionId && !seriesId) return;
     try {
-      const res = await fetch(`/api/meeting-documents?${params.toString()}`);
+      const res = await authFetch(`/api/meeting-documents?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setMeetingKnowledgeDocs(data.documents || []);
@@ -2029,7 +2029,7 @@ export default function MeetingPage() {
         return;
       }
 
-      const res = await fetch("/api/meeting-documents/upload", {
+      const res = await authFetch("/api/meeting-documents/upload", {
         method: "POST",
         body: formData,
       });
@@ -2051,7 +2051,7 @@ export default function MeetingPage() {
 
   const deleteMeetingDoc = async (id: number) => {
     try {
-      const res = await fetch(`/api/meeting-documents/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/meeting-documents/${id}`, { method: "DELETE" });
       if (res.ok) {
         setMeetingKnowledgeDocs(prev => prev.filter(d => d.id !== id));
         toast({ title: "Dokument slettet" });
@@ -2071,7 +2071,7 @@ export default function MeetingPage() {
     
     // Fetch series list for picker
     try {
-      const res = await fetch("/api/series");
+      const res = await authFetch("/api/series");
       if (res.ok) {
         const data = await res.json();
         setSeriesList(data.series || []);
@@ -2149,7 +2149,7 @@ export default function MeetingPage() {
         let seriesIndex: number | null = null;
         if (resolvedSeriesId) {
           try {
-            const siRes = await fetch(`/api/series/${resolvedSeriesId}/summaries`);
+            const siRes = await authFetch(`/api/series/${resolvedSeriesId}/summaries`);
             if (siRes.ok) {
               const siData = await siRes.json();
               seriesIndex = (siData.summaries?.length ?? 0) + 1;
@@ -2418,7 +2418,7 @@ export default function MeetingPage() {
       const formData = new FormData();
       formData.append("document", file);
       
-      const response = await fetch("/api/rules/upload", {
+      const response = await authFetch("/api/rules/upload", {
         method: "POST",
         body: formData,
         credentials: "include",
@@ -3125,7 +3125,7 @@ export default function MeetingPage() {
       <Dialog open={showSessionsDialog} onOpenChange={(open) => {
         setShowSessionsDialog(open);
         if (open) {
-          fetch("/api/series").then(r => r.ok ? r.json() : null).then(d => {
+          authFetch("/api/series").then(r => r.ok ? r.json() : null).then(d => {
             if (d?.series) setSeriesList(d.series);
           }).catch(() => {});
         }
@@ -3312,7 +3312,7 @@ export default function MeetingPage() {
                                     if (e.key === "Enter") {
                                       const newName = renameSeriesValue.trim();
                                       if (!newName) return;
-                                      fetch(`/api/series/${key}`, {
+                                      authFetch(`/api/series/${key}`, {
                                         method: "PATCH",
                                         headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify({ name: newName }),
@@ -3336,7 +3336,7 @@ export default function MeetingPage() {
                                   onClick={() => {
                                     const newName = renameSeriesValue.trim();
                                     if (!newName) return;
-                                    fetch(`/api/series/${key}`, {
+                                    authFetch(`/api/series/${key}`, {
                                       method: "PATCH",
                                       headers: { "Content-Type": "application/json" },
                                       body: JSON.stringify({ name: newName }),
