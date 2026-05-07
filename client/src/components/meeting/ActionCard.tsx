@@ -28,6 +28,15 @@ function formatDeadline(value: string | undefined | null): string {
   return value;
 }
 
+function formatClock(iso: string | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 export function ActionCard({
   action,
   index,
@@ -94,22 +103,25 @@ export function ActionCard({
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm leading-snug">{action.text}</p>
-          {(action.owner || action.deadline) ? (
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              {action.owner ? (
-                <span className="inline-flex items-center gap-1">
-                  <UserCircle2 className="h-3 w-3" />
-                  {action.owner}
-                </span>
-              ) : null}
-              {action.deadline ? (
-                <span className="inline-flex items-center gap-1">
-                  <CalendarDays className="h-3 w-3" />
-                  {formatDeadline(action.deadline)}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {action.owner ? (
+              <span className="inline-flex items-center gap-1">
+                <UserCircle2 className="h-3 w-3" />
+                {action.owner}
+              </span>
+            ) : null}
+            {action.deadline ? (
+              <span className="inline-flex items-center gap-1">
+                <CalendarDays className="h-3 w-3" />
+                {formatDeadline(action.deadline)}
+              </span>
+            ) : null}
+            {action.createdAt ? (
+              <span className="font-mono text-muted-foreground/70">
+                {formatClock(action.createdAt)}
+              </span>
+            ) : null}
+          </div>
         </div>
         {onRemove ? (
           <Button
@@ -144,22 +156,25 @@ export function ActionCard({
             aria-label="Rediger og godkjenn"
           >
             <p className="text-sm font-medium leading-snug">{action.text}</p>
-            {(action.suggestedOwner || action.suggestedDeadline) ? (
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                {action.suggestedOwner ? (
-                  <span className="inline-flex items-center gap-1">
-                    <UserCircle2 className="h-3 w-3" />
-                    {action.suggestedOwner}
-                  </span>
-                ) : null}
-                {action.suggestedDeadline ? (
-                  <span className="inline-flex items-center gap-1">
-                    <CalendarDays className="h-3 w-3" />
-                    {action.suggestedDeadline}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {action.suggestedOwner ? (
+                <span className="inline-flex items-center gap-1">
+                  <UserCircle2 className="h-3 w-3" />
+                  {action.suggestedOwner}
+                </span>
+              ) : null}
+              {action.suggestedDeadline ? (
+                <span className="inline-flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" />
+                  {action.suggestedDeadline}
+                </span>
+              ) : null}
+              {action.createdAt ? (
+                <span className="font-mono text-muted-foreground/70">
+                  {formatClock(action.createdAt)}
+                </span>
+              ) : null}
+            </div>
           </button>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <Button

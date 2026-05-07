@@ -86,21 +86,13 @@ export const LiveTranscript = forwardRef<HTMLDivElement, Props>(function LiveTra
             </div>
           ) : (
             segments.map((segment) => (
-              <div
-                key={segment.id}
-                className="pb-3 border-b border-border/40 last:border-0"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {segment.speaker}
-                  </span>
-                  <span className="text-xs text-muted-foreground/60 font-mono">
-                    {new Date(segment.timestamp).toLocaleTimeString("no-NO", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </div>
+              <div key={segment.id} className="space-y-1">
+                <span className="text-[11px] text-muted-foreground/60 font-mono">
+                  {new Date(segment.timestamp).toLocaleTimeString("no-NO", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
                 <p className="text-sm leading-relaxed">{segment.text}</p>
               </div>
             ))
