@@ -31,17 +31,17 @@ services:
       - key: DATABASE_URL
         sync: false             # Supabase URI: postgresql://postgres.<ref>:<pwd>@aws-0-...pooler.supabase.com:5432/postgres
 
-      # ----- Supabase Auth: server-side JWT-validering -----
+      # ----- Supabase Auth: server-side JWT-validering via JWKS -----
+      # Server henter offentlig ECC-nøkkel fra <URL>/auth/v1/.well-known/jwks.json
+      # og verifiserer JWT-en lokalt. Trenger ikke shared secret.
       - key: SUPABASE_URL
         sync: false             # https://<project-ref>.supabase.co (Project Settings → API)
-      - key: SUPABASE_JWT_SECRET
-        sync: false             # Project Settings → API → JWT Settings → JWT Secret
 
       # ----- Supabase Auth: frontend (Vite injecter på build-time) -----
       - key: VITE_SUPABASE_URL
         sync: false             # Samme som SUPABASE_URL — Vite trenger VITE_-prefix for å eksponere til klient
       - key: VITE_SUPABASE_ANON_KEY
-        sync: false             # Project Settings → API → anon/public key
+        sync: false             # Project Settings → API → publishable key (sb_publishable_...)
 
       # ----- Andre tjenester -----
       - key: OPENAI_API_KEY

@@ -11,7 +11,6 @@ const REQUIRED: Array<{ key: string; hint: string }> = [
   { key: "DATABASE_URL", hint: "Postgres connection string fra Supabase, f.eks. postgresql://postgres.<ref>:<pwd>@aws-0-...pooler.supabase.com:5432/postgres" },
   { key: "OPENAI_API_KEY", hint: "OpenAI API-nøkkel (sk-...)" },
   { key: "SUPABASE_URL", hint: "Supabase project URL, f.eks. https://<ref>.supabase.co (Project Settings → API)" },
-  { key: "SUPABASE_JWT_SECRET", hint: "Supabase JWT secret for å validere brukertoken (Project Settings → API → JWT Settings)" },
 ];
 
 const missing = REQUIRED.filter(({ key }) => !process.env[key]);
