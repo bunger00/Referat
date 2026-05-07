@@ -6,6 +6,10 @@ import {
   MeetingTopbar,
   MeetingBottombar,
 } from "@/components/meeting";
+import { ScreenshotGallery } from "@/components/meeting/ScreenshotGallery";
+import { useScreenCapture } from "@/hooks/use-screen-capture";
+import type { MeetingScreenshot } from "@shared/schema";
+import { Camera, Monitor, MonitorOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -112,6 +116,22 @@ function formatDeadline(value: string | undefined | null): string {
     return d.toLocaleDateString("nb-NO", { day: "numeric", month: "short", year: "numeric" });
   }
   return value;
+}
+
+/**
+ * Bytter ut `![alt](screenshot:ID)`-referanser fra AI-summary med faktiske
+ * inline base64-bilder så de rendrer i WYSIWYG-editoren.
+ */
+function inlineScreenshotImages(markdown: string, screenshots: MeetingScreenshot[]): string {
+  if (!markdown || screenshots.length === 0) return markdown;
+  return markdown.replace(/!\[([^\]]*)\]\(screenshot:(\d+)\)/g, (_, alt: string, id: string) => {
+    const shot = screenshots.find(s => String(s.id) === id);
+    if (!shot) return "";
+    const data = shot.imageData.startsWith("data:")
+      ? shot.imageData
+      : `data:${shot.mimeType};base64,${shot.imageData}`;
+    return `![${alt || shot.description.slice(0, 80)}](${data})`;
+  });
 }
 
 function loadFromStorage(): MeetingState | null {
@@ -291,6 +311,14 @@ export default function MeetingPage() {
   const audioFileInputRef = useRef<HTMLInputElement>(null);
   const summaryEditorRef = useRef<SummaryWysiwygEditorRef>(null);
   const meetingSummaryRef = useRef(meetingSummary);
+
+  // Skjermdeling og bildefangst (vision)
+  const screenCapture = useScreenCapture();
+  const [screenshots, setScreenshots] = useState<MeetingScreenshot[]>([]);
+  const [isCapturingShot, setIsCapturingShot] = useState(false);
+  const [showScreenshotsSheet, setShowScreenshotsSheet] = useState(false);
+  const transcriptForVisionRef = useRef<TranscriptSegment[]>([]);
+  useEffect(() => { transcriptForVisionRef.current = transcript; }, [transcript]);
 
   // Word corrections state
   const [wordCorrections, setWordCorrections] = useState<WordCorrection[]>([]);
@@ -1849,6 +1877,7 @@ export default function MeetingPage() {
         } catch { /* non-fatal */ }
       }
       
+      const includedShots = screenshots.filter(s => s.includedInSummary);
       const response = await apiRequest("POST", "/api/summary", {
         transcript: transcriptText,
         savedQuestions: savedQuestionTexts,
@@ -1857,11 +1886,18 @@ export default function MeetingPage() {
         pendingActions: pendingActionItems.length > 0 ? pendingActionItems : undefined,
         confirmedDecisions: confirmedDecisionItems.length > 0 ? confirmedDecisionItems : undefined,
         metadata,
+        visualContext: includedShots.length > 0 ? includedShots.map(s => ({
+          id: s.id,
+          description: s.description,
+          capturedAt: typeof s.capturedAt === "string" ? s.capturedAt : new Date(s.capturedAt as any).toISOString(),
+        })) : undefined,
       });
-      
+
       const data = await response.json() as { summary: string };
-      setMeetingSummary(data.summary);
-      meetingSummaryRef.current = data.summary;
+      // Bytt screenshot:ID-referanser med faktisk inline base64-bilde
+      const summaryWithImages = inlineScreenshotImages(data.summary, includedShots);
+      setMeetingSummary(summaryWithImages);
+      meetingSummaryRef.current = summaryWithImages;
       // Auto-save summary to DB — always await so we know if it failed
       if (sessionId) {
         try {
@@ -2308,6 +2344,87 @@ export default function MeetingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeSessionId]);
 
+  // Last skjermbilder for valgt sesjon
+  useEffect(() => {
+    if (!sessionId) {
+      setScreenshots([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await authFetch(`/api/screenshots?sessionId=${sessionId}`);
+        if (res.ok) {
+          const data = await res.json() as { screenshots: MeetingScreenshot[] };
+          setScreenshots(data.screenshots ?? []);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [sessionId]);
+
+  const captureScreenshot = useCallback(async () => {
+    if (!screenCapture.active) return;
+    setIsCapturingShot(true);
+    try {
+      const frame = await screenCapture.capture();
+      if (!frame) {
+        toast({ title: "Kunne ikke fange skjermbilde", variant: "destructive" });
+        return;
+      }
+      // Hent siste ~15 segmenter som kontekst for vision-tolkningen
+      const recent = transcriptForVisionRef.current.slice(-15).map(s => s.text).join(" ");
+      const analyzeRes = await authFetch("/api/screenshots/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData: frame.dataUrl, mimeType: "image/jpeg", recentTranscript: recent }),
+      });
+      if (!analyzeRes.ok) {
+        const txt = await analyzeRes.text();
+        toast({ title: "Vision-feil", description: txt.slice(0, 200), variant: "destructive" });
+        return;
+      }
+      const analyzeData = await analyzeRes.json() as { description: string };
+      // Lagre til db (default: included = true så bruker kan toggle av)
+      const saveRes = await authFetch("/api/screenshots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageData: frame.dataUrl,
+          mimeType: "image/jpeg",
+          description: analyzeData.description,
+          sessionId: sessionId ?? null,
+          includedInSummary: true,
+        }),
+      });
+      if (saveRes.ok) {
+        const saved = await saveRes.json() as { screenshot: MeetingScreenshot };
+        setScreenshots(prev => [saved.screenshot, ...prev]);
+        toast({ title: "Skjermbilde fanget", description: analyzeData.description.slice(0, 100) });
+      }
+    } catch (e: any) {
+      toast({ title: "Feil ved fangst", description: e?.message ?? "Ukjent feil", variant: "destructive" });
+    } finally {
+      setIsCapturingShot(false);
+    }
+  }, [screenCapture, sessionId, toast]);
+
+  const toggleScreenshotIncluded = useCallback(async (id: number, included: boolean) => {
+    setScreenshots(prev => prev.map(s => s.id === id ? { ...s, includedInSummary: included } : s));
+    try {
+      await authFetch(`/api/screenshots/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includedInSummary: included }),
+      });
+    } catch { /* ignore */ }
+  }, []);
+
+  const deleteScreenshot = useCallback(async (id: number) => {
+    setScreenshots(prev => prev.filter(s => s.id !== id));
+    try {
+      await authFetch(`/api/screenshots/${id}`, { method: "DELETE" });
+    } catch { /* ignore */ }
+  }, []);
+
   const deleteSession = async (id: number) => {
     try {
       await apiRequest("DELETE", `/api/sessions/${id}`);
@@ -2661,12 +2778,69 @@ export default function MeetingPage() {
         isGeneratingSummary={isGeneratingSummary}
         hasSummary={!!meetingSummary}
         menu={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Flere handlinger" className="shrink-0">
-                <MoreVertical className="h-4 w-4" />
+          <>
+            {/* Skjermdeling: live-indikator + capture-knapp */}
+            {screenCapture.active ? (
+              <>
+                <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-suggestion/40 bg-suggestion/10 px-2.5 py-0.5 text-xs font-medium text-suggestion">
+                  <span className="h-2 w-2 rounded-full bg-suggestion pulse-dot" />
+                  Ser skjerm
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={captureScreenshot}
+                  disabled={isCapturingShot}
+                  className="gap-1.5 shrink-0"
+                  data-testid="button-capture-screenshot"
+                >
+                  {isCapturingShot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                  <span className="hidden md:inline">Fang</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={screenCapture.stop}
+                  aria-label="Stopp skjermdeling"
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <MonitorOff className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={screenCapture.start}
+                className="gap-1.5 shrink-0 text-muted-foreground"
+                title="Del skjerm for å fange visninger til referatet"
+                data-testid="button-share-screen"
+              >
+                <Monitor className="h-4 w-4" />
+                <span className="hidden md:inline">Del skjerm</span>
               </Button>
-            </DropdownMenuTrigger>
+            )}
+            {screenshots.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowScreenshotsSheet(true)}
+                className="gap-1.5 shrink-0"
+                data-testid="button-show-screenshots"
+              >
+                <Camera className="h-4 w-4" />
+                <span className="hidden md:inline">Bilder</span>
+                <span className="rounded-full bg-suggestion/15 text-suggestion px-1.5 py-0 min-w-[1.25rem] h-[1.25rem] text-[10px] font-semibold inline-flex items-center justify-center">
+                  {screenshots.length}
+                </span>
+              </Button>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Flere handlinger" className="shrink-0">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem onClick={newMeeting} disabled={isRecording}>
                 <FilePlus2 className="h-4 w-4 mr-2" />Nytt møte
@@ -2702,6 +2876,7 @@ export default function MeetingPage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </>
         }
       />
 
@@ -2897,6 +3072,23 @@ export default function MeetingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Skjermbilder-sheet — administrer fanget bilder */}
+      <Sheet open={showScreenshotsSheet} onOpenChange={setShowScreenshotsSheet}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="font-display tracking-tightish">Skjermbilder ({screenshots.length})</SheetTitle>
+          </SheetHeader>
+          <p className="text-xs text-muted-foreground mt-2 mb-4 leading-relaxed">
+            AI-tolkede skjermbilder fra møtet. Toggle hvilke som skal med i referatet — de bygges inn ved siden av relevante avsnitt når du genererer referat.
+          </p>
+          <ScreenshotGallery
+            screenshots={screenshots}
+            onToggleInclude={toggleScreenshotIncluded}
+            onDelete={deleteScreenshot}
+          />
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={showSummaryDialog} onOpenChange={(open) => { setShowSummaryDialog(open); if (!open) { setIsEditingSummary(false); setSummaryEditText(""); if (summaryPreviewSessionId !== null) { const restored = preSummaryPreviewRef.current; setMeetingSummary(restored); meetingSummaryRef.current = restored; setSummaryPreviewSessionId(null); preSummaryPreviewRef.current = ""; } } }}>
         <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col p-0">

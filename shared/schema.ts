@@ -210,6 +210,11 @@ export const summaryRequestSchema = z.object({
     secretary: z.string().optional(),
     absent: z.string().optional(),
   }).optional(),
+  visualContext: z.array(z.object({
+    id: z.number(),
+    description: z.string(),
+    capturedAt: z.string(),
+  })).optional(),
 });
 export type SummaryRequest = z.infer<typeof summaryRequestSchema>;
 
@@ -513,3 +518,20 @@ export const interviewSessions = pgTable("interview_sessions", {
 export const insertInterviewSessionSchema = createInsertSchema(interviewSessions).omit({ id: true, startedAt: true });
 export type InsertInterviewSession = z.infer<typeof insertInterviewSessionSchema>;
 export type InterviewSession = typeof interviewSessions.$inferSelect;
+
+// ============= Skjermbilder med AI-tolkning =============
+
+export const meetingScreenshots = pgTable("meeting_screenshots", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  sessionId: integer("session_id"),
+  imageData: text("image_data").notNull(),
+  mimeType: varchar("mime_type", { length: 50 }).notNull().default("image/jpeg"),
+  description: text("description").notNull(),
+  capturedAt: timestamp("captured_at").defaultNow().notNull(),
+  includedInSummary: boolean("included_in_summary").notNull().default(false),
+});
+
+export const insertMeetingScreenshotSchema = createInsertSchema(meetingScreenshots).omit({ id: true, capturedAt: true });
+export type InsertMeetingScreenshot = z.infer<typeof insertMeetingScreenshotSchema>;
+export type MeetingScreenshot = typeof meetingScreenshots.$inferSelect;
