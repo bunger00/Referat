@@ -1036,10 +1036,16 @@ BESLUTNINGER:
 AKSJONSPUNKTER:
 - Skriv som konkret OPPGAVE, ikke som meta-avklaring: "Per og Pål skriver 15-siders rapport innen mandag" (IKKE "Bekrefte at Per og Pål tar ansvar for å skrive...")
 - Bruk substansen direkte fra transkriptet — hvis transkriptet sier "Kan Per og Pål skrive en rapport innen mandag?", aksjonen er "Per og Pål skriver rapport, frist: mandag" (ikke "bekrefte at de tar ansvar")
-- Inkluder eksplisitte oppgaver OG implisitte (åpne spørsmål, ubesvarte tall, ting som trengte avklaring)
 - Finn ansvarlig person og frist om nevnt
 - DEDUPLICERING: Sjekk EKSISTERENDE AKSJONSPUNKTER og EKSISTERENDE BESLUTNINGER. Ikke foreslå samme tema dobbelt.
-- Returner opptil 6 aksjonspunkter
+
+KVALITET FOREGÅR KVANTITET — VIKTIG:
+- Du SKAL IKKE fylle opp med spekulative aksjoner. Heller en TOM array enn meta-aksjoner som "definere kriterier for…", "etablere beslutningsgrunnlag for…", "avklare hva gruppen mener om…".
+- En aksjon krever ENTEN: (a) eksplisitt handlingsverb i transkriptet ("Per skal skrive…", "vi må sende…", "kan du sjekke…"), ELLER (b) et eksplisitt åpent spørsmål som krever oppfølging utenfor møtet.
+- Generelle diskusjoner, brainstorming, observasjoner og tilstandsbeskrivelser er IKKE aksjoner — selv om temaet er viktig.
+- TIDLIG I MØTET (mindre enn ~5 minutter med transkript eller færre enn ~15 segmenter): vær EKSTRA tilbakeholden. Vent til møtet konkretiserer. Tom array er ofte riktig svar.
+- Hvis du er i tvil om noe er en aksjon: la det være. Brukeren kan legge til manuelt hvis hen vil.
+- Maks 6 aksjonspunkter, men ofte 0-2 er det riktige antallet, særlig tidlig i møtet.
 
 Returner ALLTID gyldig JSON i dette formatet:
 {

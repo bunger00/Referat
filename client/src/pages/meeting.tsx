@@ -210,7 +210,11 @@ export default function MeetingPage() {
 
   const [autoScroll, setAutoScroll] = useState(true);
   const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState<"transcript" | "ai">("transcript");
-  const [transcriptionModel, setTranscriptionModel] = useState<"medium" | "large" | "openai">("medium");
+  // Default: OpenAI Whisper. whisper-1 er large-v2 (1.55B parametre) og fanger
+  // betydelig mer av rotete møteromslyd enn nb-whisper-medium (769M params).
+  // Brukere som vil ha norsk-finetunet transkripsjon kan velge nb-whisper-
+  // medium eller -large i Innstillinger.
+  const [transcriptionModel, setTranscriptionModel] = useState<"medium" | "large" | "openai">("openai");
   const [transcriptionEngine, setTranscriptionEngine] = useState<string | null>(null);
   const [isCleaningTranscript, setIsCleaningTranscript] = useState(false);
   const [lastTranscriptCleanup, setLastTranscriptCleanup] = useState<Date | null>(null);
