@@ -8,7 +8,10 @@ import {
   Sparkles,
   ScrollText,
   Brain,
+  Search,
+  Loader2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ActionCard } from "./ActionCard";
 import { DecisionCard } from "./DecisionCard";
@@ -58,6 +61,11 @@ type Props = {
   /* Summary slot — rendered inside the "Referat"-tab */
   summarySlot?: ReactNode;
 
+  /* Manual full-transcript scan: trigger AI på hele møtet for å lete etter
+   * aksjoner/beslutninger som ikke er fanget enda. */
+  onScanFullTranscript?: () => void;
+  isScanning?: boolean;
+
   className?: string;
 };
 
@@ -72,22 +80,41 @@ export function AIWorkbench(p: Props) {
 
   return (
     <Tabs defaultValue="actions" className={cn("flex flex-col min-h-0", p.className)}>
-      <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent p-0 h-auto overflow-x-auto">
-        <WorkbenchTab value="actions" icon={ClipboardList} label="Aksjoner" badge={actionsCount} tone="success" />
-        <WorkbenchTab value="decisions" icon={Gavel} label="Beslutninger" badge={decisionsCount} tone="decision" />
-        <WorkbenchTab value="questions" icon={MessagesSquare} label="Spørsmål" badge={questionsCount} tone="suggestion" />
-        <WorkbenchTab
-          value="warnings"
-          icon={AlertTriangle}
-          label="Advarsler"
-          badge={warningsCount}
-          tone="warning"
-          pulse={warningsCount > 0}
-        />
-        {p.summarySlot ? (
-          <WorkbenchTab value="summary" icon={ScrollText} label="Referat" />
+      <div className="flex items-center justify-between border-b border-border">
+        <TabsList className="justify-start rounded-none border-0 bg-transparent p-0 h-auto overflow-x-auto flex-1 min-w-0">
+          <WorkbenchTab value="actions" icon={ClipboardList} label="Aksjoner" badge={actionsCount} tone="success" />
+          <WorkbenchTab value="decisions" icon={Gavel} label="Beslutninger" badge={decisionsCount} tone="decision" />
+          <WorkbenchTab value="questions" icon={MessagesSquare} label="Spørsmål" badge={questionsCount} tone="suggestion" />
+          <WorkbenchTab
+            value="warnings"
+            icon={AlertTriangle}
+            label="Advarsler"
+            badge={warningsCount}
+            tone="warning"
+            pulse={warningsCount > 0}
+          />
+          {p.summarySlot ? (
+            <WorkbenchTab value="summary" icon={ScrollText} label="Referat" />
+          ) : null}
+        </TabsList>
+        {p.onScanFullTranscript ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={p.onScanFullTranscript}
+            disabled={p.isScanning}
+            className="shrink-0 mr-2 gap-1.5 h-8 text-xs text-muted-foreground hover:text-foreground"
+            title="Be AI lese hele transkriptet på nytt og lete etter aksjoner/beslutninger som ikke er fanget"
+          >
+            {p.isScanning ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">Skann hele møtet</span>
+          </Button>
         ) : null}
-      </TabsList>
+      </div>
 
       {/* Actions */}
       <TabsContent value="actions" className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 mt-0">

@@ -3084,6 +3084,30 @@ export default function MeetingPage() {
             onEditQuestion={handleEditQuestion}
             onRemoveSavedQuestion={handleRemoveSavedQuestion}
             onDismissWarning={dismissWarning}
+            onScanFullTranscript={async () => {
+              if (transcript.length === 0) {
+                toast({ title: "Ingen transkript ennå", variant: "destructive" });
+                return;
+              }
+              const beforeActions = proposedActions.filter(a => a.status === "proposed").length;
+              const beforeDecisions = proposedDecisions.filter(d => d.status === "proposed").length;
+              toast({ title: "Skanner hele møtet…", description: "AI går gjennom hele transkriptet for å lete etter aksjoner og beslutninger." });
+              await generateQuestions(999, true);
+              await new Promise(r => setTimeout(r, 600));
+              const afterActions = proposedActions.filter(a => a.status === "proposed").length;
+              const afterDecisions = proposedDecisions.filter(d => d.status === "proposed").length;
+              const newA = afterActions - beforeActions;
+              const newD = afterDecisions - beforeDecisions;
+              if (newA > 0 || newD > 0) {
+                toast({
+                  title: "Skanning ferdig",
+                  description: `${newA > 0 ? `${newA} ny${newA === 1 ? "" : "e"} aksjon${newA === 1 ? "" : "er"}` : ""}${newA > 0 && newD > 0 ? ", " : ""}${newD > 0 ? `${newD} ny${newD === 1 ? "" : "e"} beslutning${newD === 1 ? "" : "er"}` : ""} foreslått`,
+                });
+              } else {
+                toast({ title: "Skanning ferdig", description: "Ingen nye aksjoner eller beslutninger funnet — alt er allerede fanget." });
+              }
+            }}
+            isScanning={isGeneratingQuestions}
             className="h-full"
           />
         </div>
