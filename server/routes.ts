@@ -933,6 +933,124 @@ Fremgangsmåte:
   });
 
   // POST /api/analyze - accepts last-minute transcript and returns 3 questions + warnings
+  // ============= Dedicated decisions extraction =============
+  // Beslutninger blir ofte underprioritert i hoved-analyze fordi den deler
+  // token-budsjett med spørsmål, warnings, aksjoner og cross-meeting. I
+  // tillegg gir review-pass-logikken en "confirmation bias" — AI ser
+  // eksisterende-listen og blir tilfreds. Denne dedikerte pass-en kjøres
+  // PARALLELT med hoved-analyze og fokuserer KUN på å finne beslutninger
+  // i HELE full_transcript med forhøyet oppmerksomhet.
+  async function extractDecisionsDedicated(opts: {
+    fullTranscript: string;
+    recentTranscript: string;
+    existingDecisions: Array<{ id: string; text: string; status: string }>;
+    expertRole: string;
+    preferencesText: string;
+    communityRules: string;
+    summaryStyle?: string;
+  }): Promise<Array<{ id?: string; text: string; context?: string }>> {
+    if (!opts.fullTranscript || opts.fullTranscript.trim().length < 50) return [];
+    try {
+      const existingList = opts.existingDecisions.length > 0
+        ? `\n\nEKSISTERENDE BESLUTNINGER (kun for å unngå duplikater — IKKE bli tilfreds av at det finnes noen, fortsett å lete aktivt etter NYE):\n${opts.existingDecisions.map(d => `ID: ${d.id} | Status: ${d.status} | Tekst: ${d.text}`).join("\n")}`
+        : "";
+      const systemPrompt = `Du er en spesialisert beslutnings-detektor for norske møter (bygg/anlegg/prosjekt-fokus).
+
+DIN ENESTE OPPGAVE: finn BESLUTNINGER i transkriptet. Ikke aksjoner, ikke spørsmål — kun beslutninger.
+
+DEFINISJON:
+En BESLUTNING er en KONSTATERING av noe som er avgjort i møtet. Triggerord: "vi har besluttet", "vi vedtar", "ok, da gjør vi slik", "vi konkluderer med", "vi er enige om", "fastsatt", "vedtak". Også implisitte beslutninger telles: tydelig enighet som ender en diskusjon, eller utvetydige valg ("vi går for alternativ A").
+
+KRITISKE INSTRUKSJONER:
+1. LES HELE full_transcript hver gang. En beslutning tatt på minutt 7 av et 40-min møte er like gyldig som en på minutt 25. Ingen recency-bias.
+2. Eksisterende-listen er KUN for å unngå duplikater. IKKE bli "tilfreds" av at den finnes — let alltid like aktivt som om listen var tom.
+3. Hver beslutning skal være en konstatering, ikke meta. Eksempel: "Grupperom A velges fremfor B" (✓), ikke "Avklare hvilket grupperom" (✗).
+4. Inkluder kort sitat/kontekst fra transkriptet som viser HVOR beslutningen ble tatt.
+5. DEDUPLICERING: hvis en ny beslutning handler om samme tema som en eksisterende, gjenbruk eksisterende ID.
+
+ANTI-PATTERNS — IKKE returner disse:
+- "Avklare hva som ble besluttet" (meta-aksjon, ikke beslutning)
+- "Diskutere X på neste møte" (utsettelse, ikke beslutning)
+- Generelle observasjoner uten avgjørelse
+${opts.preferencesText ? `\n\nLÆRTE BRUKERPREFERANSER:\n${opts.preferencesText}` : ""}${opts.communityRules ? `\n\nGLOBALE FANG-REGLER:\n${opts.communityRules}` : ""}
+
+Returner ALLTID gyldig JSON:
+{
+  "decisions": [
+    {
+      "id": "d-001 (eller eksisterende ID hvis dedup)",
+      "text": "Beslutningen som konstatering",
+      "context": "Kort sitat fra transkriptet"
+    }
+  ]
+}
+Returner tom array hvis ingen beslutninger ble tatt.`;
+
+      const userContent = `${existingList}\n\nFULL TRANSKRIPT:\n${opts.fullTranscript}\n\nRECENT (siste minutter for ekstra fokus):\n${opts.recentTranscript}`;
+
+      const resp = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 1500,
+        temperature: 0.3,
+      });
+      const content = resp.choices[0]?.message?.content;
+      if (!content) return [];
+      try {
+        const parsed = JSON.parse(content);
+        return Array.isArray(parsed.decisions) ? parsed.decisions : [];
+      } catch {
+        const repaired = tryRepairTruncatedJson(content);
+        if (repaired) {
+          try {
+            const parsed = JSON.parse(repaired);
+            return Array.isArray(parsed.decisions) ? parsed.decisions : [];
+          } catch { return []; }
+        }
+        return [];
+      }
+    } catch (err: any) {
+      console.error("Dedicated decisions extraction failed:", err.message);
+      return [];
+    }
+  }
+
+  // Slå sammen beslutninger fra hoved-analyze og dedikert pass.
+  // Dedup ved ID-match eller ved tekst-similarity (case-insensitive overlap).
+  function mergeDecisions(
+    main: Array<{ id?: string; text: string; context?: string | null }>,
+    dedicated: Array<{ id?: string; text: string; context?: string | null }>
+  ): Array<{ id?: string; text: string; context?: string | null }> {
+    const result = [...main];
+    for (const d of dedicated) {
+      const dText = (d.text || "").toLowerCase().trim();
+      if (!dText) continue;
+      const dup = result.find(r => {
+        if (r.id && d.id && r.id === d.id) return true;
+        const rText = (r.text || "").toLowerCase().trim();
+        // Enkel similarity: ett er substring av det andre, eller mer enn 60% felles ord
+        if (rText && dText && (rText.includes(dText) || dText.includes(rText))) return true;
+        const rWords = rText.split(/\s+/).filter(w => w.length > 3);
+        const dWords = dText.split(/\s+/).filter(w => w.length > 3);
+        if (rWords.length > 0 && dWords.length > 0) {
+          const rSet: Record<string, true> = {};
+          rWords.forEach(w => { rSet[w] = true; });
+          let overlap = 0;
+          for (let i = 0; i < dWords.length; i++) if (rSet[dWords[i]]) overlap++;
+          const ratio = overlap / Math.max(rWords.length, dWords.length);
+          if (ratio > 0.6) return true;
+        }
+        return false;
+      });
+      if (!dup) result.push(d);
+    }
+    return result;
+  }
+
   app.post("/api/analyze", requireAuth, async (req, res) => {
     const userId = getUserId(req);
     try {
@@ -1079,18 +1197,33 @@ AKSJONSPUNKTER:
 KVALITET FOREGÅR KVANTITET — UNIFORM PRESISJONSBAR:
 Samme standard gjelder fra første minutt til siste minutt av møtet. Du skal IKKE være ivrigere tidlig (for å "prove yourself") eller bli stille senere (fordi du allerede har foreslått noe).
 
-KRAV TIL EN AKSJON (ALLE må være oppfylt):
-1. Det finnes en EKSPLISITT handlingstrigger i transkriptet — enten:
-   (a) handlingsverb knyttet til konkret oppgave: "Per skal skrive...", "vi må sende...", "kan du sjekke...", "innen mandag må...", "hent inn tilbud fra...";
-   (b) et eksplisitt åpent spørsmål/vurdering som krever oppfølging UTENFOR møtet.
-2. Det finnes minst én KONKRET KOMPONENT: ansvarlig person/rolle, eller frist, eller målbart resultat. Ren brainstorming uten konkretisering ER IKKE aksjon.
-3. Brukeren vil sannsynligvis godkjenne den (>70% sjanse). Hvis du er i tvil — la den være.
+KRAV TIL EN AKSJON:
+1. Det finnes en EKSPLISITT trigger i transkriptet:
+   (a) handlingsverb knyttet til konkret tema/objekt: "Per skal skrive...", "kan du sjekke...", "vi må sende...", "vurdere X vs Y", "gjennomgå flyt for...", "designe tørkerom-ventilasjon", "utvide vasken til 80 cm";
+   (b) et eksplisitt uavklart spørsmål eller faglig vurdering som krever oppfølging utenfor møtet ("vi må finne ut av...", "dette må gjennomgås", "vi har ikke tatt stilling til...");
+   (c) en konkret oppgave noen lover/foreslår å gjøre selv om ansvarlig ikke navngis ("noen må sjekke kapasiteten på arbeidstøyhenging").
 
-ANTI-PATTERNS (returner ikke disse):
-- "Definere kriterier for...", "etablere beslutningsgrunnlag for...", "avklare hva gruppen mener om..." (meta-aksjoner)
-- "Diskutere X på neste møte" (vag oppfølging uten ansvar/leveranse)
-- "Vurdere mulighetene for Y" (åpent uten konkretisering)
-- "Følge opp Z" (uten å si HVA som skal følges opp og av hvem)
+2. Aksjonen skal være FAGLIG KONKRET — ikke meta-prosess. Faglige oppgaver er gyldige selv uten eksplisitt ansvarlig/frist:
+   ✓ "Vurdere tørkeskap vs tørkerom" (konkret valg mellom to alternativer)
+   ✓ "Gjennomgå flyt for arbeidstøy/oppbevaring" (eksplisitt sagt: "flyt må gjennomgås")
+   ✓ "Designe tørkerom (ventilasjon, soner, skap)" (konkret design-task)
+   ✓ "Utvide vasken til 80 cm i NS-toalett" (konkret dimensjon-endring)
+   ✓ "Sjekke arbeidstøy-kapasitet for ~50 stk fra Kvitfjell"
+
+ANTI-PATTERNS (returner IKKE disse — meta-aksjoner om møteprosess):
+✗ "Definere kriterier for..." (vagt, prosess-meta)
+✗ "Etablere beslutningsgrunnlag for..." (prosess-meta)
+✗ "Avklare hva gruppen mener om..." (meta om møteprosess)
+✗ "Diskutere X på neste møte" (utsettelse uten konkret leveranse)
+✗ "Følge opp Z" (uten å si HVA)
+
+NØKKEL-DISTINKSJON:
+- ✓ Faglig vurdering med konkret tema → aksjon
+- ✓ Konkret design/spec/utredning som må gjøres → aksjon
+- ✓ Eksplisitt uavklart spørsmål om tekniske valg → aksjon
+- ✗ Meta-aksjon om hvordan møtet skal fungere → ikke aksjon
+
+Hvis ansvarlig/frist nevnes: ta det med. Hvis ikke nevnt: bare la feltene være tomme — IKKE skip aksjonen av den grunn alene.
 
 REELT MØTE-SCENARIO — UTGANG:
 - Møter har typisk 2-5 ekte aksjoner over hele møtet. Ikke alle minutter har en aksjon.
@@ -1180,20 +1313,33 @@ ${transcript}`;
 
         // Higher temperature for sureaud to make responses more unpredictable and edgy
         const temperature = role === "sureaud" ? 0.95 : 0.7;
-        
-        const response = await openai.chat.completions.create({
-          model: "gpt-4.1",
-          messages: [
-            { role: "system", content: combinedSystemPrompt },
-            { role: "user", content: userContent }
-          ],
-          response_format: { type: "json_object" },
-          max_tokens: 2500,
-          temperature,
-        });
+
+        // Kjør hoved-analyze og dedikert beslutninger-pass i parallell.
+        // Dedikert pass har én oppgave (beslutninger), full transkript-fokus,
+        // ingen multi-task-overhead, og blir ikke "tilfreds" av eksisterende.
+        const [response, dedicatedDecisions] = await Promise.all([
+          openai.chat.completions.create({
+            model: "gpt-4.1",
+            messages: [
+              { role: "system", content: combinedSystemPrompt },
+              { role: "user", content: userContent }
+            ],
+            response_format: { type: "json_object" },
+            max_tokens: 3500,
+            temperature,
+          }),
+          extractDecisionsDedicated({
+            fullTranscript: fullTranscript || transcript || "",
+            recentTranscript: transcript || "",
+            existingDecisions: (existingDecisions || []).map(d => ({ id: d.id, text: d.text, status: d.status })),
+            expertRole: role,
+            preferencesText: aiPrefs?.profileText || "",
+            communityRules: activeRules.map(r => r.pattern).join("\n"),
+          }),
+        ]);
 
         const content = response.choices[0]?.message?.content;
-        console.log("GPT response with rules:", content?.substring(0, 500));
+        console.log("GPT response with rules:", content?.substring(0, 500), "| dedicated decisions:", dedicatedDecisions.length);
 
         if (!content) {
           console.log("Analyze: No content from GPT");
@@ -1215,13 +1361,19 @@ ${transcript}`;
             suggestedOwner: a.suggestedOwner || null,
             suggestedDeadline: a.suggestedDeadline || null,
           }));
-          const decisions = (result.decisions || []).map((d: any, idx: number) => ({
+          const mainDecisions = (result.decisions || []).map((d: any, idx: number) => ({
             id: d.id || `d-${Date.now()}-${idx}`,
             text: d.text || "",
             context: d.context || null,
           }));
+          // Slå sammen med dedikert pass — fanger det multi-task call'en misset
+          const decisions = mergeDecisions(mainDecisions, dedicatedDecisions.map((d, i) => ({
+            id: d.id || `d-ded-${Date.now()}-${i}`,
+            text: d.text || "",
+            context: d.context || null,
+          })));
 
-          console.log("Analyze with rules: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", warnings.length, "warnings,", actions.length, "actions,", decisions.length, "decisions");
+          console.log("Analyze with rules: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", warnings.length, "warnings,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisions.length, "+ dedicated unique:", decisions.length - mainDecisions.length, ")");
           res.json({ 
             questions: questions.slice(0, 3),
             crossMeetingQuestions: crossMeetingQuestions.slice(0, 3),
@@ -1252,21 +1404,37 @@ Spørsmålene skal:
 OPPGAVE 2 + 3: AKSJONSPUNKTER OG BESLUTNINGER (UNIFORM PRESISJONSBAR)
 Samme høye standard fra første minutt til siste minutt. Du skal IKKE være ivrigere tidlig (for å "prove yourself") eller bli stille senere (fordi du allerede har foreslått noe). Ekte aksjoner kan dukke opp på minutt 25 i et 40-minutters møte — fortsatt fang dem.
 
-KRAV TIL EN AKSJON (ALLE må være oppfylt):
-1. EKSPLISITT handlingstrigger i transkriptet: handlingsverb + konkret oppgave ("Per skal skrive...", "kan du sjekke...", "vi må sende...", "innen mandag må...", "hent inn tilbud fra...") ELLER eksplisitt åpent spørsmål som krever oppfølging utenfor møtet.
-2. Minst én KONKRET KOMPONENT: ansvarlig person/rolle, eller frist, eller målbart resultat. Ren brainstorming uten konkretisering ER IKKE aksjon.
-3. Brukeren vil sannsynligvis godkjenne den (>70% sjanse). I tvil → la den være.
+KRAV TIL EN AKSJON:
+1. Det finnes en EKSPLISITT trigger i transkriptet:
+   (a) handlingsverb knyttet til konkret tema/objekt: "Per skal skrive...", "kan du sjekke...", "vi må sende...", "vurdere X vs Y", "gjennomgå flyt for...", "designe tørkerom-ventilasjon", "utvide vasken til 80 cm";
+   (b) et eksplisitt uavklart spørsmål eller faglig vurdering som krever oppfølging utenfor møtet ("vi må finne ut av...", "dette må gjennomgås", "vi har ikke tatt stilling til...");
+   (c) en konkret oppgave noen lover/foreslår å gjøre selv om ansvarlig ikke navngis.
+
+2. Aksjonen skal være FAGLIG KONKRET — ikke meta-prosess. Faglige oppgaver er gyldige selv uten eksplisitt ansvarlig/frist:
+   ✓ "Vurdere tørkeskap vs tørkerom" (konkret valg mellom to alternativer)
+   ✓ "Gjennomgå flyt for arbeidstøy/oppbevaring" (eksplisitt sagt: "flyt må gjennomgås")
+   ✓ "Designe tørkerom (ventilasjon, soner, skap)" (konkret design-task)
+   ✓ "Utvide vasken til 80 cm i NS-toalett" (konkret dimensjon-endring)
 
 KRAV TIL EN BESLUTNING (ALLE må være oppfylt):
 1. KONSTATERING av noe avgjort: "vi har bestemt", "vi vedtar", "ok, da gjør vi slik", eller tydelig enighet som ender en diskusjon.
 2. Skriv som direkte konstatering, ikke som meta: "Grupperom A velges fremfor B" — ikke "Avklare hvilket grupperom som skal velges".
 3. Legg ved kort sitat/kontekst fra transkriptet som viser hvor beslutningen ble tatt.
 
-ANTI-PATTERNS (returner ikke disse):
-- "Definere kriterier for...", "etablere beslutningsgrunnlag for...", "avklare hva gruppen mener om..." (meta-aksjoner)
-- "Diskutere X på neste møte" (vag oppfølging uten ansvar/leveranse)
-- "Vurdere mulighetene for Y" (åpent uten konkretisering)
-- "Følge opp Z" (uten å si HVA og av HVEM)
+ANTI-PATTERNS (returner IKKE disse — meta om møteprosess):
+✗ "Definere kriterier for..." (vagt prosess-meta)
+✗ "Etablere beslutningsgrunnlag for..." (prosess-meta)
+✗ "Avklare hva gruppen mener om..." (meta om møteprosess)
+✗ "Diskutere X på neste møte" (utsettelse uten konkret leveranse)
+✗ "Følge opp Z" (uten å si HVA)
+
+NØKKEL-DISTINKSJON:
+- ✓ Faglig vurdering med konkret tema → aksjon
+- ✓ Konkret design/spec/utredning som må gjøres → aksjon
+- ✓ Eksplisitt uavklart spørsmål om tekniske valg → aksjon
+- ✗ Meta-aksjon om hvordan møtet skal fungere → ikke aksjon
+
+Hvis ansvarlig/frist nevnes: ta det med. Hvis ikke nevnt: bare la feltene være tomme — IKKE skip aksjonen av den grunn alene.
 
 REELT MØTE-SCENARIO:
 - Møter har typisk 2-5 ekte aksjoner over hele møtet — ikke alle minutter har en aksjon.
@@ -1335,21 +1503,33 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
         
         // Higher temperature for sureaud to make responses more unpredictable and edgy
         const temperature = role === "sureaud" ? 0.95 : 0.7;
-        
-        const response = await openai.chat.completions.create({
-          model: "gpt-4.1",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userContent }
+
+        // Hoved-analyze og dedikert beslutninger-pass parallelt (samme grunn
+        // som i with-rules-pathen — multi-task overhead og confirmation bias).
+        const [response, dedicatedDecisionsList] = await Promise.all([
+          openai.chat.completions.create({
+            model: "gpt-4.1",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userContent }
           ],
           response_format: { type: "json_object" },
-          max_tokens: 2500,
+          max_tokens: 3500,
           temperature,
-        });
+          }),
+          extractDecisionsDedicated({
+            fullTranscript: fullTranscript || transcript || "",
+            recentTranscript: transcript || "",
+            existingDecisions: (existingDecisions || []).map(d => ({ id: d.id, text: d.text, status: d.status })),
+            expertRole: role,
+            preferencesText: aiPrefs?.profileText || "",
+            communityRules: activeRules.map(r => r.pattern).join("\n"),
+          }),
+        ]);
 
         const content = response.choices[0]?.message?.content;
         const finishReason = response.choices[0]?.finish_reason;
-        console.log("GPT response:", content?.slice(0, 300), "finish:", finishReason);
+        console.log("GPT response:", content?.slice(0, 300), "finish:", finishReason, "| dedicated decisions:", dedicatedDecisionsList.length);
 
         if (!content) {
           console.log("Analyze: No content from GPT");
@@ -1395,13 +1575,18 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
           suggestedOwner: a.suggestedOwner || null,
           suggestedDeadline: a.suggestedDeadline || null,
         }));
-        const decisions = (result.decisions || []).map((d: any, idx: number) => ({
+        const mainDecisionsW = (result.decisions || []).map((d: any, idx: number) => ({
           id: d.id || `d-${Date.now()}-${idx}`,
           text: d.text || "",
           context: d.context || null,
         }));
-        
-        console.log("Analyze: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", actions.length, "actions,", decisions.length, "decisions");
+        const decisions = mergeDecisions(mainDecisionsW, dedicatedDecisionsList.map((d, i) => ({
+          id: d.id || `d-ded-${Date.now()}-${i}`,
+          text: d.text || "",
+          context: d.context || null,
+        })));
+
+        console.log("Analyze: Returning", questions.length, "questions,", crossMeetingQuestions.length, "cross-meeting,", actions.length, "actions,", decisions.length, "decisions (main:", mainDecisionsW.length, "+ dedicated unique:", decisions.length - mainDecisionsW.length, ")");
         res.json({ questions: questions.slice(0, 3), crossMeetingQuestions: crossMeetingQuestions.slice(0, 3), warnings: [], actions, decisions });
       }
       
