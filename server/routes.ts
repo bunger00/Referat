@@ -1047,7 +1047,7 @@ REVIEW-PASS FØRST (viktigste skritt): Før du leter etter nye items, gå gjenno
 - Hvis det blir tydelig at en item er feilklassifisert (aksjon som egentlig er beslutning eller omvendt): la det stå — brukeren har "Til beslutning"/"Til aksjon"-knapper og styrer det selv.
 - IKKE rør items med status "approved", "confirmed" eller "rejected" — brukeren har bestemt seg, de er låst.
 
-ETTER review-passen: let etter NYE items i recent_transcript som ikke allerede er fanget.
+ETTER review-passen: let etter NYE items både i recent_transcript OG i deler av FULL TRANSKRIPT som ikke ble dekket før. Sustained vigilance: ekte aksjoner kan dukke opp på minutt 25 av et møte selv om tidligere passes ga få funn — ikke bli "lazy" når du allerede har foreslått noe.
 
 LES TRANSKRIPTET SOM SAMMENHENGENDE TEKST. Hvert "Taler X"-segment er ofte kuttet midt i en setning fordi lyden chunkes hvert 28. sekund — to påfølgende segmenter med kort tidsavstand er som regel én ytring. Eksempel: "Vi har i ledergruppen besluttet." + "At i uke 22 skal alle gå med gummistøvler på jobben." = én komplett beslutning. Ikke behandle dem som adskilte løsrevne setninger.
 
@@ -1076,13 +1076,31 @@ AKSJONSPUNKTER:
 - Finn ansvarlig person og frist om nevnt
 - DEDUPLICERING: Sjekk EKSISTERENDE AKSJONSPUNKTER og EKSISTERENDE BESLUTNINGER. Ikke foreslå samme tema dobbelt.
 
-KVALITET FOREGÅR KVANTITET — VIKTIG:
-- Du SKAL IKKE fylle opp med spekulative aksjoner. Heller en TOM array enn meta-aksjoner som "definere kriterier for…", "etablere beslutningsgrunnlag for…", "avklare hva gruppen mener om…".
-- En aksjon krever ENTEN: (a) eksplisitt handlingsverb i transkriptet ("Per skal skrive…", "vi må sende…", "kan du sjekke…"), ELLER (b) et eksplisitt åpent spørsmål som krever oppfølging utenfor møtet.
-- Generelle diskusjoner, brainstorming, observasjoner og tilstandsbeskrivelser er IKKE aksjoner — selv om temaet er viktig.
-- TIDLIG I MØTET (mindre enn ~5 minutter med transkript eller færre enn ~15 segmenter): vær EKSTRA tilbakeholden. Vent til møtet konkretiserer. Tom array er ofte riktig svar.
-- Hvis du er i tvil om noe er en aksjon: la det være. Brukeren kan legge til manuelt hvis hen vil.
-- Maks 6 aksjonspunkter, men ofte 0-2 er det riktige antallet, særlig tidlig i møtet.
+KVALITET FOREGÅR KVANTITET — UNIFORM PRESISJONSBAR:
+Samme standard gjelder fra første minutt til siste minutt av møtet. Du skal IKKE være ivrigere tidlig (for å "prove yourself") eller bli stille senere (fordi du allerede har foreslått noe).
+
+KRAV TIL EN AKSJON (ALLE må være oppfylt):
+1. Det finnes en EKSPLISITT handlingstrigger i transkriptet — enten:
+   (a) handlingsverb knyttet til konkret oppgave: "Per skal skrive...", "vi må sende...", "kan du sjekke...", "innen mandag må...", "hent inn tilbud fra...";
+   (b) et eksplisitt åpent spørsmål/vurdering som krever oppfølging UTENFOR møtet.
+2. Det finnes minst én KONKRET KOMPONENT: ansvarlig person/rolle, eller frist, eller målbart resultat. Ren brainstorming uten konkretisering ER IKKE aksjon.
+3. Brukeren vil sannsynligvis godkjenne den (>70% sjanse). Hvis du er i tvil — la den være.
+
+ANTI-PATTERNS (returner ikke disse):
+- "Definere kriterier for...", "etablere beslutningsgrunnlag for...", "avklare hva gruppen mener om..." (meta-aksjoner)
+- "Diskutere X på neste møte" (vag oppfølging uten ansvar/leveranse)
+- "Vurdere mulighetene for Y" (åpent uten konkretisering)
+- "Følge opp Z" (uten å si HVA som skal følges opp og av hvem)
+
+REELT MØTE-SCENARIO — UTGANG:
+- Møter har typisk 2-5 ekte aksjoner over hele møtet. Ikke alle minutter har en aksjon.
+- Tom array er KORREKT svar i 60-70% av analyze-kall — ikke et problem.
+- I lange møter (30-60 min): noen ganger dukker det opp 1 ny aksjon på minutt 25 eller 40 selv om tidligere passes ga 0-1. Du må FORTSATT lete aktivt etter slike — selv om de eksisterende items dekker noen tidligere temaer. Stillehet skal komme fra at det ikke er noe å fange, ikke fra at du har "gjort din del".
+
+LET I HELE FULL TRANSKRIPT for nye items, men prioritér de siste ~10 minuttene:
+- ETTER review-passen: gå gjennom siste ~10 min av FULL TRANSKRIPT for nye konkrete oppgaver/beslutninger som ikke allerede er fanget.
+- Hvis du finner noe som krysser minuttegrensen mellom recent og tidligere: fang det hvis det matcher kravene over.
+- Maks 6 aksjoner per kall, men 0-2 er det vanligste utfallet i et bra fungerende møte.
 
 Returner ALLTID gyldig JSON i dette formatet:
 {
@@ -1231,24 +1249,38 @@ Spørsmålene skal:
 - Knytte seg til noe faktisk sagt i recent_transcript
 - Hjelpe gruppen til å avklare beslutninger, tydeliggjøre ansvar, oppdage risiko
 
-OPPGAVE 2: AKSJONSPUNKTER
-Se igjennom recent_transcript og identifiser potensielle aksjonspunkter – konkrete ting som skal gjøres, innhentes, avklares, besluttes eller følges opp.
-- Inkluder BÅDE eksplisitte oppgaver (noen sier direkte "vi må...") OG implisitte (åpne spørsmål som ikke ble besvart, ting som trengte mer avklaring, tall som må finnes, beslutninger som ble utsatt).
-- Vær raus – det er bedre å foreslå for mange enn for få. Brukeren godkjenner eller avviser selv.
-- Beskriv hvert aksjonspunkt som en konkret oppgave med verb: "Hente inn...", "Avklare...", "Undersøke...", "Bekrefte...", "Planlegge besøk til...", etc.
-- Forsøk å finne hvem som er ansvarlig (person/rolle nevnt i transkript) og eventuelle frister.
-- DEDUPLICERING: Hvis et nytt aksjonspunkt handler om det SAMME som et eksisterende (se EKSISTERENDE AKSJONSPUNKTER over), GJENBRUK den eksisterende IDen og oppdater tekst/ansvarlig/frist med mer detaljert informasjon. IKKE lag et nytt aksjonspunkt for det samme temaet.
-- Returner opptil 6 aksjonspunkter – prioritér de viktigste, men utelat ikke relevante implisitte oppgaver.
-- Returner tom liste KUN hvis absolutt ingenting kan følges opp.
+OPPGAVE 2 + 3: AKSJONSPUNKTER OG BESLUTNINGER (UNIFORM PRESISJONSBAR)
+Samme høye standard fra første minutt til siste minutt. Du skal IKKE være ivrigere tidlig (for å "prove yourself") eller bli stille senere (fordi du allerede har foreslått noe). Ekte aksjoner kan dukke opp på minutt 25 i et 40-minutters møte — fortsatt fang dem.
 
-OPPGAVE 3: BESLUTNINGER
-Se igjennom recent_transcript og identifiser beslutninger som ble tatt – ting gruppen ble enige om, vedtok eller konkluderte med.
-- Inkluder BÅDE eksplisitte beslutninger ("vi beslutter at...", "ok, da gjør vi slik") OG implisitte (enighet som kom frem gjennom diskusjonen).
-- Skriv beslutningen som en konstatering: "Grupperom A velges fremfor alternativ B", "Prosjektleder får ansvar for..."
-- Legg ved et kort sitat/kontekst fra transkriptet som viser at beslutningen ble tatt.
-- DEDUPLICERING: Hvis en ny beslutning handler om det SAMME som en eksisterende (se EKSISTERENDE BESLUTNINGER over), GJENBRUK den eksisterende IDen og oppdater tekst/kontekst med mer presis informasjon. IKKE lag en ny beslutning for det samme vedtaket.
-- Returner opptil 4 beslutninger per kall.
-- Returner tom liste hvis ingen beslutninger ble tatt.
+KRAV TIL EN AKSJON (ALLE må være oppfylt):
+1. EKSPLISITT handlingstrigger i transkriptet: handlingsverb + konkret oppgave ("Per skal skrive...", "kan du sjekke...", "vi må sende...", "innen mandag må...", "hent inn tilbud fra...") ELLER eksplisitt åpent spørsmål som krever oppfølging utenfor møtet.
+2. Minst én KONKRET KOMPONENT: ansvarlig person/rolle, eller frist, eller målbart resultat. Ren brainstorming uten konkretisering ER IKKE aksjon.
+3. Brukeren vil sannsynligvis godkjenne den (>70% sjanse). I tvil → la den være.
+
+KRAV TIL EN BESLUTNING (ALLE må være oppfylt):
+1. KONSTATERING av noe avgjort: "vi har bestemt", "vi vedtar", "ok, da gjør vi slik", eller tydelig enighet som ender en diskusjon.
+2. Skriv som direkte konstatering, ikke som meta: "Grupperom A velges fremfor B" — ikke "Avklare hvilket grupperom som skal velges".
+3. Legg ved kort sitat/kontekst fra transkriptet som viser hvor beslutningen ble tatt.
+
+ANTI-PATTERNS (returner ikke disse):
+- "Definere kriterier for...", "etablere beslutningsgrunnlag for...", "avklare hva gruppen mener om..." (meta-aksjoner)
+- "Diskutere X på neste møte" (vag oppfølging uten ansvar/leveranse)
+- "Vurdere mulighetene for Y" (åpent uten konkretisering)
+- "Følge opp Z" (uten å si HVA og av HVEM)
+
+REELT MØTE-SCENARIO:
+- Møter har typisk 2-5 ekte aksjoner over hele møtet — ikke alle minutter har en aksjon.
+- Tom array er KORREKT svar i 60-70% av analyze-kall — ikke et problem.
+- I lange møter (30-60 min): noen ganger dukker det opp 1 ny aksjon på minutt 25 eller 40 selv om tidligere passes ga 0-1. Du må FORTSATT lete aktivt etter slike.
+- Stillhet skal komme fra at det IKKE er noe å fange, ikke fra at du har "gjort din del" tidligere.
+
+LET I HELE FULL TRANSKRIPT for nye items, men prioritér de siste ~10 minuttene:
+- ETTER review-passen: gå gjennom siste ~10 min av FULL TRANSKRIPT for nye konkrete oppgaver/beslutninger som ikke allerede er fanget.
+- Hvis du finner noe som krysser minuttegrensen mellom recent og tidligere: fang det hvis det matcher kravene.
+
+DEDUPLICERING: Hvis et nytt forslag handler om SAMME tema som et eksisterende, GJENBRUK den eksisterende IDen og oppdater tekst/ansvarlig/frist/kontekst — IKKE lag duplikat.
+
+Maks 6 aksjoner, maks 4 beslutninger per kall — men 0-2 av hver er det vanligste utfallet i et bra fungerende møte.
 
 Returner i JSON-format:
 {
