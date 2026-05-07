@@ -1811,8 +1811,6 @@ Divide the discussion into 3–7 main themes. For each theme:
   - Short, concrete main points
   - Reference people by name where it makes sense
   - Include estimates, numbers, dates and assumptions when they appear
-- **Uavklarte spørsmål / åpen usikkerhet:**
-  - Bullet list of things mentioned but not resolved
 - **Aksjoner og beslutninger under dette temaet:**
   - List bare de aksjonene/beslutningene som ER i input — ikke finn opp nye her. Skriv ut full tekst i stedet for å referere til "aksjon #X".
 
