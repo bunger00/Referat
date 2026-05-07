@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRoute } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -136,6 +137,8 @@ function clearStorage() {
 
 export default function MeetingPage() {
   const { toast } = useToast();
+  const [, routeParams] = useRoute<{ id: string }>("/m/:id");
+  const routeSessionId = routeParams?.id ? parseInt(routeParams.id, 10) : null;
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -2194,6 +2197,14 @@ export default function MeetingPage() {
     }
   };
 
+  // Auto-load session when navigating to /m/:id (e.g. from history or home)
+  useEffect(() => {
+    if (routeSessionId && routeSessionId !== sessionId) {
+      loadSession(routeSessionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeSessionId]);
+
   const deleteSession = async (id: number) => {
     try {
       await apiRequest("DELETE", `/api/sessions/${id}`);
@@ -2821,18 +2832,6 @@ export default function MeetingPage() {
         )}
       </div>
 
-      {/* Logout Button */}
-      <div className="pt-4 border-t">
-        <Button
-          variant="ghost"
-          onClick={logout}
-          data-testid="button-logout"
-          className="w-full gap-2 text-muted-foreground"
-        >
-          <LogOut className="h-4 w-4" />
-          Logg ut
-        </Button>
-      </div>
     </div>
   );
 
@@ -2974,7 +2973,7 @@ export default function MeetingPage() {
   };
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -3236,15 +3235,6 @@ export default function MeetingPage() {
                   {meetingKnowledgeDocs.length > 0 && (
                     <span className="ml-2 text-xs text-muted-foreground">{meetingKnowledgeDocs.length}</span>
                   )}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={logout}
-                  data-testid="button-logout-desktop"
-                  className="text-muted-foreground"
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logg ut
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

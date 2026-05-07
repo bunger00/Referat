@@ -5,11 +5,16 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
+import HomePage from "@/pages/home";
 import MeetingPage from "@/pages/meeting";
+import HistoryPage from "@/pages/history";
+import KnowledgePage from "@/pages/knowledge";
+import SettingsPage from "@/pages/settings";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
+import { AppShell } from "@/components/ds";
 
 function AuthenticatedRouter() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -47,11 +52,18 @@ function AuthenticatedRouter() {
   }
 
   return (
-    <Switch>
-      <Route path="/" component={MeetingPage} />
-      <Route path="/login" component={MeetingPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <AppShell>
+      <Switch>
+        <Route path="/" component={HomePage} />
+        <Route path="/mote" component={MeetingPage} />
+        <Route path="/m/:id" component={MeetingPage} />
+        <Route path="/historikk" component={HistoryPage} />
+        <Route path="/kunnskapsbase" component={KnowledgePage} />
+        <Route path="/innstillinger" component={SettingsPage} />
+        <Route path="/login" component={HomePage} />
+        <Route component={NotFound} />
+      </Switch>
+    </AppShell>
   );
 }
 

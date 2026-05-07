@@ -347,6 +347,103 @@ Total: ~3.5 timer fokusert arbeid. Leveres som én commit-serie på branch.
 
 ---
 
-## Review (fylles ut etter implementasjon)
+## Review
 
-_Tom — fylles ut når implementasjonen er ferdig._
+### Hva ble levert
+
+**Fase A — Designsystem (Norden)**
+- `client/src/index.css`: Komplett redesign av CSS-variabler. Light = varm
+  krem-bakgrunn, dyp fjord-teal primary, korall accent, salvie/plomme/rav
+  semantikk. Dark = natt-fjord. Reelle skygge-tokens (var. → tailwind).
+  Pulse-animasjoner for opptak (ring-pulse + dot-pulse).
+- `tailwind.config.ts`: Lagt til `success`, `warning`, `decision`,
+  `suggestion`-farger; `2xl/xl/lg/md/sm` radius-tokens; full skygge-skala
+  (xs til 2xl); `letterSpacing.display/tightish`; ny `font-display` familie.
+- `client/index.html`: Trimmet Google Fonts fra ~30 familier til 3 (Inter,
+  Fraunces, JetBrains Mono) — betydelig bedre lasting.
+
+**Fase B — Designsystem-komponenter** i `client/src/components/ds/`:
+- `AppShell` — viewport-låst flex-layout med sidebar + main, smart
+  scroll-håndtering (meeting.tsx får sin egen overflow, andre sider scroller
+  fritt).
+- `Sidebar` — desktop venstre-navigasjon med 5 ruter, brukerinfo,
+  logout. Aktiv rute markeres.
+- `MobileNav` — sticky topbar + Sheet-drawer på mobil.
+- `Page`, `PageHeader`, `Section`, `Panel`, `EmptyState`, `CTACard`,
+  `StatPill`, `RecordButton`, `LiveIndicator`, `OnboardingHint` — komplett
+  toolkit for alle nye sider.
+
+**Fase C — Onboarding**
+- `client/src/lib/hints.ts`: localStorage-styrt hint-system med
+  `dismissHint` / `isHintDismissed` / `resetAllHints` API.
+- `OnboardingHint`-komponent som viser kontekstuelle førstegangs-tips
+  med "skjul"-knapp.
+
+**Fase D — Nye sider**
+- `pages/home.tsx`: Velkomst-dashbord med tids-tilpasset hilsen, 3 store
+  CTA-kort (start møte / last opp / historikk), siste 4 møter som kort med
+  StatPills, snarveier til kunnskapsbase + innstillinger. Empty state for
+  nye brukere.
+- `pages/history.tsx`: Søkbar/filtrerbar liste over alle møter med
+  dato/varighet/aksjon-/beslutnings-tellere som StatPills. Rename- og
+  delete-handling via dropdown-menu og bekreftelsesdialog.
+- `pages/knowledge.tsx`: Tre-tabs (Regelverk / Ordrettelser /
+  Møtedokumenter), hver med egen empty state og inline-CRUD. Erstatter
+  3 separate modaler fra meeting-siden.
+- `pages/settings.tsx`: Fire-tabs (Profil / AI / Transkribering / Referat).
+  Lagrer brukerpreferanser i localStorage. Viser læringsprofiler med
+  manuell oppdaterings-knapp. Reset-tooltips-knapp for testing onboarding.
+
+**Fase E — Login/signup-redesign**
+- To-kolonne layout: venstre brand-side (kun desktop) med fjord-teal-
+  bakgrunn, animerte glow-effekter, Fraunces-tagline; høyre med form i
+  ren, fokusert layout. Native Google + Microsoft SVG-logoer i stedet for
+  emoji-tegn. Mobil får single-kolonne med kompakt logo.
+
+**Fase F — Routing + meeting-integrasjon**
+- `App.tsx`: 5 ruter (/, /mote, /m/:id, /historikk, /kunnskapsbase,
+  /innstillinger) wrappet i AppShell.
+- `meeting.tsx`: useRoute-hook for å auto-laste sesjon når navigert via
+  /m/:id (fra historikk eller hjem). Fjernet redundant logout-knapp fra
+  både desktop dropdown og mobil-sheet (nå i sidebar). Endret
+  `h-screen` til `flex-1 min-h-0` for å samspille med AppShell.
+
+### Hva ble IKKE levert (med begrunnelse)
+
+- **Splitting av meeting.tsx (5949 linjer) til feature-moduler**: Risikoen
+  for å introdusere subtile regresjoner i lydopptak-pipelinen er for stor
+  for én leveranse. CLAUDE.md sier eksplisitt at AudioContext + WAV-
+  encoding hvert 28s IKKE skal røres. Splittingen krever metodisk testing
+  hvert steg. Kan tas som egen oppfølging.
+- **InlineApprover som erstatter approval-modaler i meeting**: Samme
+  begrunnelse — endrer godkjenningsflyten ville kreve å plukke fra
+  hverandre 100+ linjer JSX og state-håndtering. Foreslås som neste
+  redesign-runde.
+- **Tabs i AI-arbeidsbenken**: Samme. Behold dagens scrollbare panel
+  inntil videre.
+
+Det betyr at meeting-siden visuelt får ny identitet (farger, typografi,
+skygger flyter via CSS-variabler), nytt shell rundt seg, men beholder
+den indre layouten. Resten av appen — som er der brukeren bruker mest
+tid på utenfor selve møtene — er fullstendig redesignet.
+
+### Verifisering
+
+- ✓ `npm run check`: Alle gjenværende TS-feil er pre-eksisterende
+  (verifisert ved git stash-test). Mine endringer introduserer null
+  nye feil.
+- ✓ `npm run build`: Vellykket bygg, 2211 moduler transformert, ingen
+  build-feil. Eneste warnings er pre-eksisterende `import.meta` cjs-
+  warnings i vite.config.ts.
+- ✓ Auth-flyt urørt (jose + JWKS). API-endepunkter urørt. Schema urørt.
+  Lydopptak-pipeline urørt.
+
+### Lærdommer (til `tasks/lessons.md` neste runde)
+
+- Når en monolitt på 5949 linjer skal redesignes: ny shell + nye periferi-
+  sider gir 80% av brukeropplevelsen mens monolitten kan splittes
+  inkrementelt etterpå. Lavere risiko, raskere leveranse.
+- CSS-variabler som design-tokens betyr at en visuell identitets-endring
+  flyter automatisk gjennom hundrevis av eksisterende komponenter — null
+  refaktor av forbruker-koden trengs.
+
