@@ -5,6 +5,15 @@ import { StatPill } from "@/components/ds";
 import type { Question, ExpertRole } from "@shared/schema";
 import { expertRoleLabels } from "@shared/schema";
 
+function formatClock(iso: string | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 type Props = {
   question: Question;
   variant: "active" | "saved";
@@ -78,20 +87,23 @@ export function QuestionCard({ question, variant, onSave, onDelete, onEdit, onRe
           </Button>
         </div>
       </div>
-      {(isCrossMeeting || question.expertRole || question.annotation) ? (
-        <div className="flex flex-wrap items-center gap-1.5 pl-6">
-          {isCrossMeeting ? (
-            <StatPill tone="warning">Motstrid fra tidligere møte</StatPill>
-          ) : question.expertRole ? (
-            <StatPill>{expertRoleLabels[question.expertRole as ExpertRole]}</StatPill>
-          ) : null}
-          {question.annotation ? (
-            <span className="text-xs italic text-muted-foreground">
-              Notat: {question.annotation}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-1.5 pl-6">
+        {isCrossMeeting ? (
+          <StatPill tone="warning">Motstrid fra tidligere møte</StatPill>
+        ) : question.expertRole ? (
+          <StatPill>{expertRoleLabels[question.expertRole as ExpertRole]}</StatPill>
+        ) : null}
+        {question.createdAt ? (
+          <span className="text-xs text-muted-foreground/70 font-mono">
+            {formatClock(question.createdAt)}
+          </span>
+        ) : null}
+        {question.annotation ? (
+          <span className="text-xs italic text-muted-foreground">
+            Notat: {question.annotation}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

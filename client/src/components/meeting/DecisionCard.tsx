@@ -2,9 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Check, X, ArrowRightLeft, UserCircle2, Quote, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProposedDecision } from "@shared/schema";
+
+function formatClock(iso: string | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
 
 type Props = {
   decision: ProposedDecision;
@@ -69,12 +77,19 @@ export function DecisionCard({
         </span>
         <div className="flex-1 min-w-0 space-y-1">
           <p className="text-sm leading-snug">{decision.text}</p>
-          {decision.owner ? (
-            <p className="text-xs text-muted-foreground inline-flex items-center gap-1">
-              <UserCircle2 className="h-3 w-3" />
-              {decision.owner}
-            </p>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {decision.owner ? (
+              <span className="inline-flex items-center gap-1">
+                <UserCircle2 className="h-3 w-3" />
+                {decision.owner}
+              </span>
+            ) : null}
+            {decision.createdAt ? (
+              <span className="font-mono text-muted-foreground/70">
+                {formatClock(decision.createdAt)}
+              </span>
+            ) : null}
+          </div>
           {decision.context ? (
             <p className="text-xs italic text-muted-foreground">"{decision.context}"</p>
           ) : null}
@@ -110,6 +125,11 @@ export function DecisionCard({
             className="text-left w-full"
           >
             <p className="text-sm font-medium leading-snug">{decision.text}</p>
+            {decision.createdAt ? (
+              <p className="mt-1.5 text-xs text-muted-foreground/70 font-mono">
+                {formatClock(decision.createdAt)}
+              </p>
+            ) : null}
             {decision.context ? (
               <p className="mt-1.5 text-xs italic text-muted-foreground inline-flex items-start gap-1">
                 <Quote className="h-3 w-3 mt-0.5 shrink-0" />

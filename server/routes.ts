@@ -556,40 +556,61 @@ export async function registerRoutes(
       };
       
       if (transcription.text && transcription.text.trim() && !isHallucination(transcription.text)) {
-        // HF returns chunks: [{timestamp: [start, end], text}]
+        // Bygg naturlige avsnitt: slå sammen påfølgende chunks med kort pause
+        // mellom dem, og bryt avsnitt på reelle pauser (>1.5s) eller når
+        // avsnittet blir langt og siste tegn er setningsslutt. Dette gir
+        // flytende lesbar tekst i stedet for ett-segment-per-setning.
         if (transcription.chunks && transcription.chunks.length > 0) {
+          const PAUSE_THRESHOLD = 1.5; // sek
+          const MAX_PARAGRAPH_CHARS = 500;
+
+          let currentText = "";
           let lastEndTime = 0;
-          const PAUSE_THRESHOLD = 1.5; // seconds
-          
+          let hasStarted = false;
+
+          const flushParagraph = () => {
+            const trimmed = currentText.trim();
+            if (trimmed) {
+              segments.push({
+                id: `seg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                timestamp: new Date().toISOString(),
+                speaker: "",
+                text: trimmed,
+              });
+            }
+            currentText = "";
+            hasStarted = false;
+          };
+
           for (const chunk of transcription.chunks) {
             if (isHallucination(chunk.text)) continue;
-            
+
             const chunkStart = chunk.timestamp[0] ?? 0;
             const chunkEnd = chunk.timestamp[1] ?? chunkStart;
-            
-            // Pause-based speaker switching
-            const gap = chunkStart - lastEndTime;
-            if (gap > PAUSE_THRESHOLD) {
-              speakerCounter++;
+
+            if (hasStarted) {
+              const gap = chunkStart - lastEndTime;
+              const trimmedSoFar = currentText.trim();
+              const lastChar = trimmedSoFar.slice(-1);
+              const sentenceEnd = /[.!?]/.test(lastChar);
+
+              if (gap > PAUSE_THRESHOLD || (trimmedSoFar.length > MAX_PARAGRAPH_CHARS && sentenceEnd)) {
+                flushParagraph();
+              }
             }
+
+            if (currentText) currentText += " " + chunk.text.trim();
+            else currentText = chunk.text.trim();
+            hasStarted = true;
             lastEndTime = chunkEnd;
-            
-            const speakerNum = (speakerCounter % 3) + 1;
-            
-            segments.push({
-              id: `seg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              timestamp: new Date().toISOString(),
-              speaker: `Taler ${speakerNum}`,
-              text: chunk.text.trim(),
-            });
           }
+          flushParagraph();
         } else {
-          // Fallback: single segment with full text
-          const speakerNum = (speakerCounter % 3) + 1;
+          // Fallback: ett segment med full tekst
           segments.push({
             id: `seg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             timestamp: new Date().toISOString(),
-            speaker: `Taler ${speakerNum}`,
+            speaker: "",
             text: transcription.text.trim(),
           });
         }
