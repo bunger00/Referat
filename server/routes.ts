@@ -1769,8 +1769,6 @@ Bruk metadata når tilgjengelig. Hvis et felt mangler, skriv [Mangler]. Bruk EKS
 |---|---|
 | **Dato** | <dato fra metadata> |
 | **Tid** | <tid fra metadata + varighet hvis kjent> |
-| **Sted / format** | <fysisk lokasjon eller Teams/Zoom> |
-| **Møteleder** | <navn> |
 | **Referent** | <navn eller "AI-basert referat fra transkribering"> |
 | **Deltakere** | <Navn 1, Navn 2, Navn 3 — kommaseparert på én linje> |
 | **Fraværende** | <Navn 1, Navn 2 — kommaseparert, eller "Ingen meldt"> |

@@ -1896,24 +1896,20 @@ export default function MeetingPage() {
       }).join("\n");
       const savedQuestionTexts = savedQuestions.map(q => q.text);
       
-      // Build metadata — user-provided fields take priority over auto-detected
+      // Build metadata — fjernede felt (prosjekt, kunde, sted, møteleder) sendes
+      // ikke lenger. Dato og tid er alltid live (startTime eller nå).
       const autoParticipants = Array.from(new Set(transcript.map(s => speakerMappings[s.speaker] || s.speaker)));
       const autoDate = startTime ? new Date(startTime).toLocaleDateString('nb-NO') : new Date().toLocaleDateString('nb-NO');
-      const autoTime = startTime ? new Date(startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : undefined;
+      const autoTime = startTime ? new Date(startTime).toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
-      // Parse user-provided participants (comma/newline separated) or fall back to auto-detected
       const userParticipants = meetingMeta.participants
         ? meetingMeta.participants.split(/[,\n]+/).map(p => p.trim()).filter(Boolean)
         : undefined;
 
       const metadata = {
         meeting_title: meetingMeta.title || undefined,
-        project: meetingMeta.project || undefined,
-        client: meetingMeta.client || undefined,
-        date: meetingMeta.date || autoDate,
-        time: meetingMeta.time || autoTime,
-        location: meetingMeta.location || undefined,
-        meeting_leader: meetingMeta.meetingLeader || undefined,
+        date: autoDate,
+        time: autoTime,
         secretary: meetingMeta.secretary || undefined,
         participants: userParticipants ?? (autoParticipants.length > 0 ? autoParticipants : undefined),
         absent: meetingMeta.absent || undefined,
@@ -2950,7 +2946,7 @@ export default function MeetingPage() {
         }
       />
 
-      {/* Møteinformasjon (collapsible) */}
+      {/* Møteinformasjon (collapsible) — minimal og lekker */}
       <div className="shrink-0 border-b border-border bg-muted/20">
         <button
           type="button"
@@ -2960,7 +2956,7 @@ export default function MeetingPage() {
           <span className="inline-flex items-center gap-2">
             <CalendarDays className="h-3.5 w-3.5" />
             Møteinformasjon
-            {(meetingMeta.title || meetingMeta.project || meetingMeta.meetingLeader) ? (
+            {(meetingMeta.title || meetingMeta.participants) ? (
               <span className="rounded-full bg-success/15 text-success px-2 py-0.5 text-[10px] font-medium">
                 Utfylt
               </span>
@@ -2969,44 +2965,59 @@ export default function MeetingPage() {
           {metaOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
         {metaOpen ? (
-          <div className="px-4 sm:px-6 pb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[
-              { label: "Møtetittel", key: "title" as const, ph: "F.eks. Byggemøte uke 15", span: "md:col-span-2 lg:col-span-3" },
-              { label: "Prosjekt", key: "project" as const, ph: "Prosjektnavn" },
-              { label: "Kunde", key: "client" as const, ph: "Kunde / oppdragsgiver" },
-              { label: "Sted", key: "location" as const, ph: "F.eks. Byggeplass, Teams" },
-              { label: "Møteleder", key: "meetingLeader" as const, ph: "Navn" },
-              { label: "Referent", key: "secretary" as const, ph: "Navn (valgfritt)" },
-              { label: "Deltakere", key: "participants" as const, ph: "Navn, kommaseparert" },
-              { label: "Fraværende", key: "absent" as const, ph: "Navn, kommaseparert" },
-            ].map(f => (
-              <div key={f.key} className={f.span ?? ""}>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">{f.label}</label>
-                <Input
-                  placeholder={f.ph}
-                  value={(meetingMeta as any)[f.key] || ""}
-                  onChange={e => setMeetingMeta(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  className="h-9 text-sm bg-card"
-                />
-              </div>
-            ))}
+          <div className="px-4 sm:px-6 pb-4 space-y-3">
+            {/* Auto-utledet dato og tid (live) — vises som rolige info-pills, ikke inputs */}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-card border border-card-border px-2.5 py-1">
+                <CalendarDays className="h-3 w-3" />
+                {new Date().toLocaleDateString("nb-NO", { day: "numeric", month: "long", year: "numeric" })}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-card border border-card-border px-2.5 py-1">
+                <Clock className="h-3 w-3" />
+                {startTime
+                  ? `Startet ${new Date(startTime).toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}`
+                  : new Date().toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+
+            {/* Bare det essensielle — full-bredde tittel, så 3 felt under */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Dato</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Møtetittel</label>
               <Input
-                type="date"
-                value={meetingMeta.date || ""}
-                onChange={e => setMeetingMeta(prev => ({ ...prev, date: e.target.value }))}
-                className="h-9 text-sm bg-card [color-scheme:light] dark:[color-scheme:dark]"
+                placeholder="F.eks. Byggemøte uke 15"
+                value={meetingMeta.title || ""}
+                onChange={e => setMeetingMeta(prev => ({ ...prev, title: e.target.value }))}
+                className="h-10 sm:h-9 text-sm bg-card"
               />
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Tid</label>
-              <Input
-                type="time"
-                value={meetingMeta.time || ""}
-                onChange={e => setMeetingMeta(prev => ({ ...prev, time: e.target.value }))}
-                className="h-9 text-sm bg-card [color-scheme:light] dark:[color-scheme:dark]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Referent</label>
+                <Input
+                  placeholder="Navn (valgfritt)"
+                  value={meetingMeta.secretary || ""}
+                  onChange={e => setMeetingMeta(prev => ({ ...prev, secretary: e.target.value }))}
+                  className="h-10 sm:h-9 text-sm bg-card"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Deltakere</label>
+                <Input
+                  placeholder="Navn, kommaseparert"
+                  value={meetingMeta.participants || ""}
+                  onChange={e => setMeetingMeta(prev => ({ ...prev, participants: e.target.value }))}
+                  className="h-10 sm:h-9 text-sm bg-card"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Fraværende</label>
+                <Input
+                  placeholder="Navn, kommaseparert (valgfritt)"
+                  value={meetingMeta.absent || ""}
+                  onChange={e => setMeetingMeta(prev => ({ ...prev, absent: e.target.value }))}
+                  className="h-10 sm:h-9 text-sm bg-card"
+                />
+              </div>
             </div>
           </div>
         ) : null}
