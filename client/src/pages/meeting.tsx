@@ -1875,6 +1875,18 @@ export default function MeetingPage() {
     
     setIsGeneratingSummary(true);
     setShowSummaryDialog(true);
+
+    // Kjør en sluttanalyse på FULL transkript før referat lages, slik at
+    // panelene (aksjoner/beslutninger) er 1:1 med det som havner i referatet.
+    // Brukeren ser også alle nye forslag i panelet før referatet blir generert.
+    try {
+      toast({ title: "Gjør en sluttvurdering", description: "Sjekker hele transkriptet for aksjoner/beslutninger før referat lages…", duration: 4000 });
+      await generateQuestions(999, false);
+      // Liten pause så brukeren rekker å se eventuelle nye forslag pope inn i panelet
+      await new Promise(r => setTimeout(r, 1200));
+    } catch (e) {
+      console.error("Sluttanalyse før referat feilet:", e);
+    }
     
     try {
       const transcriptText = transcript.map(s => {
