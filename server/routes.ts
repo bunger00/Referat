@@ -1603,18 +1603,13 @@ Return the meeting minutes as MARKDOWN with the following structure and headings
 Use the metadata provided (user-provided fields take priority). If a field is missing, write [Mangler].
 
 - **Møtetittel:** <fra metadata eller utledet fra transkript>
-- **Prosjekt:** <fra metadata>
-- **Kunde/oppdragsgiver:** <fra metadata>
 - **Dato:** <fra metadata>
 - **Tid:** <fra metadata, og varighet hvis kjent>
 - **Sted / format:** <fra metadata, eller "fysisk / Teams / Zoom" hvis mulig å utlede>
 - **Møteleder:** <fra metadata>
 - **Referent:** <fra metadata, ellers "AI-basert referat fra transkribering">
-- **Deltakere:**
-  - Navn 1 (rolle hvis kjent)
-  - Navn 2
-- **Fraværende (meldt forfall):**
-  - <fra metadata, eller "Ingen nevnt">
+- **Deltakere:** Navn 1, Navn 2, Navn 3 (kommaseparert på én linje, IKKE punktliste under hverandre)
+- **Fraværende (meldt forfall):** Navn 1, Navn 2 (kommaseparert; eller "Ingen nevnt")
 
 ## 2. Kort oppsummering
 3–7 concise bullet points that quickly explain:
@@ -1624,29 +1619,24 @@ Use the metadata provided (user-provided fields take priority). If a field is mi
 Each point should stand alone and make sense for someone who was not at the meeting.
 
 ## 3. Beslutninger
-Use the confirmed decisions from the user's input (marked "Bekreftede beslutninger") — these are verified by a meeting participant.
-Also add other clear decisions you identify from the transcript.
-Write "Ingen formelle beslutninger ble tatt" only if you are certain.
+**STRENGT KRAV — 1:1 MED BRUKERENS PANEL:**
+Bruk KUN de bekreftede beslutningene som er gitt under "Bekreftede beslutninger" i input. IKKE legg til nye beslutninger fra transkriptet — hvis brukeren ikke har bekreftet dem, skal de ikke være her. Hvis ingen bekreftede beslutninger ble gitt, skriv "Ingen bekreftede beslutninger".
 
 | # | Beslutning | Eier / ansvarlig | Dato vedtatt | Kommentar |
 |---|------------|------------------|--------------|-----------|
 
 ## 4. Aksjonspunkter (To-do)
-This is the most important section. Be extra careful here.
-Use the APPROVED action items from the user's input as the primary source — these are confirmed by a meeting participant and should show Status "Godkjent".
-Items with Status "Manuelt" were entered manually by a participant (not AI-detected) — keep them with Status "Manuelt".
-Also include PROPOSED action items (unconfirmed) with Status "Foreslått".
-Add any action items you identify in the transcript that are not already listed.
+**STRENGT KRAV — 1:1 MED BRUKERENS PANEL:**
+Bruk KUN de godkjente og foreslåtte aksjonspunktene fra input. IKKE legg til nye aksjoner fra transkriptet. Manuelle items (source = manual) skal også med.
 
-| # | Aksjon | Eier | Frist | Prioritet | Status | Referanse |
-|---|--------|------|-------|-----------|--------|-----------|
+| # | Aksjon | Eier | Frist |
+|---|--------|------|-------|
 
 Instructions:
 - "Aksjon" must be a concrete task, written as something that can actually be done.
-- "Eier" should be one person if possible.
-- "Frist": If explicitly mentioned, use the date. If only vague timing, write e.g. "Neste uke (antatt)". If not mentioned: "[Ikke avtalt]".
-- "Prioritet": Høy / Medium / Lav, based on how important and time-sensitive the task seems.
-- "Status": Use "Godkjent", "Foreslått", "Manuelt", or "Ny" as indicated by the input data. New items from transcript start as "Ny".
+- "Eier" should be one person if possible. Bruk det som er gitt i input — ikke gjett.
+- "Frist": If explicitly given in input, use that. If not: "[Ikke avtalt]".
+- IKKE inkluder kolonnene Prioritet, Status, Referanse — kun #, Aksjon, Eier, Frist.
 
 ## 5. Hovedtemaer og diskusjon
 Divide the discussion into 3–7 main themes. For each theme:
@@ -1660,7 +1650,7 @@ Divide the discussion into 3–7 main themes. For each theme:
 - **Uavklarte spørsmål / åpen usikkerhet:**
   - Bullet list of things mentioned but not resolved
 - **Aksjoner og beslutninger under dette temaet:**
-  - Write out the full text of each action and decision that belongs to this theme — do NOT refer to "aksjon #X" or "beslutning #Y". Repeat the actual text here so readers don't need to scroll back.
+  - List bare de aksjonene/beslutningene som ER i input — ikke finn opp nye her. Skriv ut full tekst i stedet for å referere til "aksjon #X".
 
 FORMATKRAV
 - Output must be valid Markdown.
