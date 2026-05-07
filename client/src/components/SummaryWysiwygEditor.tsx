@@ -56,7 +56,7 @@ const SummaryWysiwygEditor = forwardRef<SummaryWysiwygEditorRef, Props>(({ initi
   useEffect(() => {
     if (editor && initialMarkdown) {
       const html = marked.parse(initialMarkdown) as string;
-      editor.commands.setContent(html, false);
+      editor.commands.setContent(html, { emitUpdate: false });
     }
   }, [initialMarkdown]);
 
