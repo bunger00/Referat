@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -19,6 +19,7 @@ import { AppShell } from "@/components/ds";
 function AuthenticatedRouter() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [showSignup, setShowSignup] = useState(false);
+  const [location] = useLocation();
 
   useEffect(() => {
     // Initial session check
@@ -51,18 +52,32 @@ function AuthenticatedRouter() {
       : <LoginPage onLoginSuccess={() => { /* state flips via onAuthStateChange */ }} onSwitchToSignup={() => setShowSignup(true)} />;
   }
 
+  // MeetingPage holds the live recording (MediaStream, AudioContext, transcript
+  // state, intervals) and MUST stay mounted across navigations so the user can
+  // browse to settings or history mid-meeting without losing the recording.
+  // Hidden via CSS when not on a meeting route. Other pages mount/unmount as
+  // normal via the Switch.
+  const isMeetingRoute =
+    location.startsWith("/mote") || location.startsWith("/m/") || location === "/login";
+
   return (
     <AppShell>
-      <Switch>
-        <Route path="/" component={HomePage} />
-        <Route path="/mote" component={MeetingPage} />
-        <Route path="/m/:id" component={MeetingPage} />
-        <Route path="/historikk" component={HistoryPage} />
-        <Route path="/kunnskapsbase" component={KnowledgePage} />
-        <Route path="/innstillinger" component={SettingsPage} />
-        <Route path="/login" component={HomePage} />
-        <Route component={NotFound} />
-      </Switch>
+      <div className={isMeetingRoute ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+        <MeetingPage />
+      </div>
+      <div className={!isMeetingRoute ? "flex-1 min-h-0 overflow-y-auto" : "hidden"}>
+        <Switch>
+          <Route path="/" component={HomePage} />
+          <Route path="/historikk" component={HistoryPage} />
+          <Route path="/kunnskapsbase" component={KnowledgePage} />
+          <Route path="/innstillinger" component={SettingsPage} />
+          {/* Meeting routes are handled by the always-mounted MeetingPage above. */}
+          <Route path="/mote">{null}</Route>
+          <Route path="/m/:id">{null}</Route>
+          <Route path="/login">{null}</Route>
+          <Route component={NotFound} />
+        </Switch>
+      </div>
     </AppShell>
   );
 }
