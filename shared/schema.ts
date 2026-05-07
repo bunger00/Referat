@@ -604,3 +604,24 @@ export const communitySignals = pgTable("community_signals", {
 export type CommunitySignal = typeof communitySignals.$inferSelect;
 export const insertCommunitySignalSchema = createInsertSchema(communitySignals).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertCommunitySignal = z.infer<typeof insertCommunitySignalSchema>;
+
+// ============= AI usage tracking =============
+
+export const aiUsageLog = pgTable("ai_usage_log", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id"),
+  endpoint: varchar("endpoint", { length: 64 }).notNull(),
+  model: varchar("model", { length: 64 }).notNull(),
+  promptTokens: integer("prompt_tokens").notNull().default(0),
+  completionTokens: integer("completion_tokens").notNull().default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+  // Estimat i USD millicent (0.001 USD), så vi kan summere uten desimaler.
+  costMicrocents: integer("cost_microcents").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("idx_ai_usage_log_user").on(t.userId),
+  endpointIdx: index("idx_ai_usage_log_endpoint").on(t.endpoint),
+  createdIdx: index("idx_ai_usage_log_created").on(t.createdAt),
+}));
+
+export type AiUsageLogEntry = typeof aiUsageLog.$inferSelect;
