@@ -1951,8 +1951,9 @@ export default function MeetingPage() {
         transcript: transcriptText,
         savedQuestions: savedQuestionTexts,
         seriesSummaries: summarySeriesSummaries,
+        // Kun BEKREFTEDE aksjoner og beslutninger havner i referatet.
+        // Foreslåtte (pending) tas bevisst ikke med — bruker må godkjenne dem først.
         approvedActions: approvedActionItems.length > 0 ? approvedActionItems : undefined,
-        pendingActions: pendingActionItems.length > 0 ? pendingActionItems : undefined,
         confirmedDecisions: confirmedDecisionItems.length > 0 ? confirmedDecisionItems : undefined,
         metadata,
         visualContext: includedShots.length > 0 ? includedShots.map(s => ({

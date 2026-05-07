@@ -119,50 +119,57 @@ export function DecisionCard({
     >
       {!expanded ? (
         <>
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="text-left w-full"
-          >
+          <div className="space-y-1.5">
             <p className="text-sm font-medium leading-snug">{decision.text}</p>
             {decision.createdAt ? (
-              <p className="mt-1.5 text-xs text-muted-foreground/70 font-mono">
+              <p className="text-xs text-muted-foreground/70 font-mono">
                 {formatClock(decision.createdAt)}
               </p>
             ) : null}
             {decision.context ? (
-              <p className="mt-1.5 text-xs italic text-muted-foreground inline-flex items-start gap-1">
+              <p className="text-xs italic text-muted-foreground inline-flex items-start gap-1">
                 <Quote className="h-3 w-3 mt-0.5 shrink-0" />
                 <span>"{decision.context}"</span>
               </p>
             ) : null}
-          </button>
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          </div>
+          {/* Én-tap "Bekreft" på mobil. "Rediger" åpner inline-edit. */}
+          <div className="mt-3 grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center">
             <Button
               size="sm"
-              onClick={() => setExpanded(true)}
-              className="h-7 px-2.5 text-xs gap-1 bg-decision text-decision-foreground hover:bg-decision/90"
+              onClick={() => onConfirm(decision.id, { text: decision.text })}
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-decision text-decision-foreground hover:bg-decision/90"
             >
-              <Check className="h-3.5 w-3.5" />
+              <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               Bekreft
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExpanded(true)}
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5"
+              aria-label="Rediger og bekreft"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Rediger
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onMoveToAction(decision.id)}
-              className="h-7 px-2 text-xs gap-1 text-success hover:bg-success/10"
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 text-success hover:bg-success/10"
               title="Flytt til aksjoner"
             >
-              <ArrowRightLeft className="h-3 w-3" />
+              <ArrowRightLeft className="h-3.5 w-3.5" />
               Til aksjon
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onReject(decision.id)}
-              className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-destructive"
+              className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 text-muted-foreground hover:text-destructive"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               Avvis
             </Button>
           </div>
@@ -186,26 +193,26 @@ export function DecisionCard({
               "{decision.context}"
             </p>
           ) : null}
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <div className="text-[10px] text-muted-foreground">
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+            <div className="hidden sm:block text-[10px] text-muted-foreground">
               <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">⌘ Enter</kbd> bekreft ·{" "}
               <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">Esc</kbd> lukk
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center">
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onClick={() => setExpanded(false)}
-                className="h-7 text-xs"
+                className="h-10 sm:h-8 text-sm sm:text-xs"
               >
                 Avbryt
               </Button>
               <Button
                 size="sm"
                 onClick={handleConfirm}
-                className="h-7 px-3 text-xs gap-1 bg-decision text-decision-foreground hover:bg-decision/90"
+                className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-decision text-decision-foreground hover:bg-decision/90"
               >
-                <Check className="h-3.5 w-3.5" />
+                <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                 Bekreft
               </Button>
             </div>
