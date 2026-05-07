@@ -6,9 +6,25 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: ".5625rem", /* 9px */
-        md: ".375rem", /* 6px */
-        sm: ".1875rem", /* 3px */
+        '2xl': "1rem",      /* 16px — hovedpaneler */
+        xl: ".875rem",       /* 14px — kort */
+        lg: "var(--radius)", /* 12px */
+        md: "calc(var(--radius) - 4px)", /* 8px */
+        sm: "calc(var(--radius) - 8px)", /* 4px */
+      },
+      boxShadow: {
+        '2xs': "var(--shadow-2xs)",
+        xs: "var(--shadow-xs)",
+        sm: "var(--shadow-sm)",
+        DEFAULT: "var(--shadow)",
+        md: "var(--shadow-md)",
+        lg: "var(--shadow-lg)",
+        xl: "var(--shadow-xl)",
+        '2xl': "var(--shadow-2xl)",
+      },
+      letterSpacing: {
+        display: "var(--tracking-display)",
+        tightish: "var(--tracking-tight)",
       },
       colors: {
         // Flat / base colors (regular buttons)
@@ -51,6 +67,22 @@ export default {
           foreground: "hsl(var(--destructive-foreground) / <alpha-value>)",
           border: "var(--destructive-border)",
         },
+        success: {
+          DEFAULT: "hsl(var(--success) / <alpha-value>)",
+          foreground: "hsl(var(--success-foreground) / <alpha-value>)",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning) / <alpha-value>)",
+          foreground: "hsl(var(--warning-foreground) / <alpha-value>)",
+        },
+        decision: {
+          DEFAULT: "hsl(var(--decision) / <alpha-value>)",
+          foreground: "hsl(var(--decision-foreground) / <alpha-value>)",
+        },
+        suggestion: {
+          DEFAULT: "hsl(var(--suggestion) / <alpha-value>)",
+          foreground: "hsl(var(--suggestion-foreground) / <alpha-value>)",
+        },
         ring: "hsl(var(--ring) / <alpha-value>)",
         chart: {
           "1": "hsl(var(--chart-1) / <alpha-value>)",
@@ -84,6 +116,7 @@ export default {
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
+        display: ["var(--font-display)"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
       },
