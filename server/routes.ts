@@ -4,6 +4,8 @@ import OpenAI, { toFile } from "openai";
 import { z } from "zod";
 import { requireAuth, getUserId } from "./auth";
 import { analyzeRequestSchema, transcribeRequestSchema, summaryRequestSchema, transcriptSegmentSchema, interviewCriterionLabels, type ExpertRole, type ExtractedRule, type Warning, type MeetingDocument, type TranscriptSegment, type InterviewScores, type StarStatus, type InterviewEvalSnapshot, type InterviewReport } from "@shared/schema";
+import { tryRepairTruncatedJson } from "./lib/json-repair";
+import { mergeDecisions } from "./lib/merge-decisions";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -1021,36 +1023,6 @@ Returner tom array hvis ingen beslutninger ble tatt.`;
 
   // Slå sammen beslutninger fra hoved-analyze og dedikert pass.
   // Dedup ved ID-match eller ved tekst-similarity (case-insensitive overlap).
-  function mergeDecisions(
-    main: Array<{ id?: string; text: string; context?: string | null }>,
-    dedicated: Array<{ id?: string; text: string; context?: string | null }>
-  ): Array<{ id?: string; text: string; context?: string | null }> {
-    const result = [...main];
-    for (const d of dedicated) {
-      const dText = (d.text || "").toLowerCase().trim();
-      if (!dText) continue;
-      const dup = result.find(r => {
-        if (r.id && d.id && r.id === d.id) return true;
-        const rText = (r.text || "").toLowerCase().trim();
-        // Enkel similarity: ett er substring av det andre, eller mer enn 60% felles ord
-        if (rText && dText && (rText.includes(dText) || dText.includes(rText))) return true;
-        const rWords = rText.split(/\s+/).filter(w => w.length > 3);
-        const dWords = dText.split(/\s+/).filter(w => w.length > 3);
-        if (rWords.length > 0 && dWords.length > 0) {
-          const rSet: Record<string, true> = {};
-          rWords.forEach(w => { rSet[w] = true; });
-          let overlap = 0;
-          for (let i = 0; i < dWords.length; i++) if (rSet[dWords[i]]) overlap++;
-          const ratio = overlap / Math.max(rWords.length, dWords.length);
-          if (ratio > 0.6) return true;
-        }
-        return false;
-      });
-      if (!dup) result.push(d);
-    }
-    return result;
-  }
-
   app.post("/api/analyze", requireAuth, async (req, res) => {
     const userId = getUserId(req);
     try {
@@ -3421,70 +3393,6 @@ Returner JSON med:
   });
 
   return httpServer;
-}
-
-/**
- * Forsøker å reparere JSON som ble kuttet midt i (typisk når GPT treffer
- * max_tokens). Klipper til siste komma/objekt-grense og lukker
- * gjenstående { [ med } ]. Best-effort — returnerer null hvis det ikke gir
- * gyldig JSON.
- */
-function tryRepairTruncatedJson(raw: string): string | null {
-  if (!raw) return null;
-  let s = raw.trim();
-  // Strip eventuell markdown code fence
-  s = s.replace(/^```(json)?\s*/i, "").replace(/```\s*$/i, "");
-
-  // Tell ulukkede strukturer
-  let inString = false;
-  let escape = false;
-  const stack: string[] = [];
-  let lastSafeIdx = -1;
-
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (escape) { escape = false; continue; }
-    if (c === "\\") { escape = true; continue; }
-    if (c === '"') { inString = !inString; continue; }
-    if (inString) continue;
-
-    if (c === "{" || c === "[") stack.push(c);
-    else if (c === "}" || c === "]") stack.pop();
-
-    if (stack.length > 0 && (c === "," || c === "}" || c === "]")) {
-      lastSafeIdx = i;
-    }
-  }
-
-  // Hvis vi er midt i en streng, klipp ved siste sikre punkt
-  let truncated = s;
-  if (inString && lastSafeIdx > 0) {
-    truncated = s.slice(0, lastSafeIdx + 1);
-    // Telle igjen
-    inString = false;
-    escape = false;
-    stack.length = 0;
-    for (let i = 0; i < truncated.length; i++) {
-      const c = truncated[i];
-      if (escape) { escape = false; continue; }
-      if (c === "\\") { escape = true; continue; }
-      if (c === '"') { inString = !inString; continue; }
-      if (inString) continue;
-      if (c === "{" || c === "[") stack.push(c);
-      else if (c === "}" || c === "]") stack.pop();
-    }
-  }
-
-  // Fjern hengende komma før vi lukker
-  truncated = truncated.replace(/,\s*$/, "");
-
-  // Lukk gjenstående
-  while (stack.length > 0) {
-    const open = stack.pop()!;
-    truncated += open === "{" ? "}" : "]";
-  }
-
-  return truncated;
 }
 
 function buildInterviewSystemPrompt(industry: string): string {
