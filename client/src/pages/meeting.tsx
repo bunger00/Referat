@@ -611,6 +611,27 @@ export default function MeetingPage() {
     };
   }, [handleScrollEvent]);
 
+  // Whisper-modeller (både nb-whisper og OpenAI Whisper) er trent på 16 kHz.
+  // Ved å sende 48 kHz får vi 3× større filer og whispers preprocessor må
+  // gjøre arbeid som ofte forringer kvaliteten på fjernstemmer. Vi resampler
+  // selv med lineær interpolasjon før WAV-encoding.
+  const TARGET_SAMPLE_RATE = 16000;
+
+  const downsampleTo16k = (input: Float32Array, inputRate: number): Float32Array => {
+    if (inputRate === TARGET_SAMPLE_RATE) return input;
+    const ratio = inputRate / TARGET_SAMPLE_RATE;
+    const outLength = Math.round(input.length / ratio);
+    const out = new Float32Array(outLength);
+    for (let i = 0; i < outLength; i++) {
+      const srcIdx = i * ratio;
+      const a = Math.floor(srcIdx);
+      const b = Math.min(a + 1, input.length - 1);
+      const t = srcIdx - a;
+      out[i] = input[a] * (1 - t) + input[b] * t;
+    }
+    return out;
+  };
+
   // Encode raw mono Float32 PCM samples to a 16-bit WAV blob.
   // Whisper accepts wav/flac/mp3 directly, so this is the cleanest format.
   const encodeWav = (samples: Float32Array, sampleRate: number): Blob => {
@@ -658,7 +679,8 @@ export default function MeetingPage() {
       merged.set(f, pos);
       pos += f.length;
     }
-    return encodeWav(merged, pcmSampleRateRef.current);
+    const downsampled = downsampleTo16k(merged, pcmSampleRateRef.current);
+    return encodeWav(downsampled, TARGET_SAMPLE_RATE);
   };
 
   // Returns a promise that resolves after the transcribe response has been
@@ -1337,8 +1359,15 @@ export default function MeetingPage() {
       }
       
       // Simplified audio constraints for better iOS Safari compatibility
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          // Browser-side audio processing — store/conf-rooms har ofte stemmer
+          // langt fra mikrofonen, så vi vil ha alle disse av-default på.
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        }
       });
       
       streamRef.current = stream;
