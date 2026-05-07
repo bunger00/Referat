@@ -149,26 +149,47 @@ Fjern utdaterte: `APP_PASSWORD_HASH`, `SESSION_SECRET`.
     ender tilbake på login-siden uten feilmelding.** Du vil tro alt er ok
     fordi consent-skjermen vises, men token-utvekslingen dør.
 
-31. Trykk "Grant admin consent for <Org Name>" så jobb-brukere slipper
+31. **🚨 ENDA EN LUMSK FELLE 🚨** Token configuration → Add optional claim
+    → Token type: **ID** → marker `email` → Add.
+
+    API permissions sier hva appen *får be om*. Token configuration sier
+    hva som faktisk *kommer med* i ID-tokenet. Microsoft inkluderer IKKE
+    email i ID-tokenet by default selv om `email`-scopen er gitt og
+    consent er gitt. Du må eksplisitt liste email som optional claim her,
+    ellers får Supabase fortsatt 500-feilen fra steg 30 selv om
+    permissions ser riktige ut. Dette er en Microsoft-spesifikk quirk —
+    Google har ikke dette skillet.
+
+    Audience for `email`-claimet er "All users" (virker for personal +
+    work + skole), så velg det.
+
+32. Trykk "Grant admin consent for <Org Name>" så jobb-brukere slipper
     individuell consent-skjerm.
 
-32. Supabase → Authentication → Providers → Azure → enable, lim inn:
+33. Supabase → Authentication → Providers → Azure → enable, lim inn:
     - Application (client) ID
     - Secret Value (NB: Value, ikke Secret ID)
     - Azure Tenant URL: `https://login.microsoftonline.com/common`
       (`common` for multitenant + personal — ikke tenant-spesifikk URL
       med mindre du valgte single-tenant)
 
+    Hvis du fortsatt får email-feilen etter steg 31, kan du som
+    siste-utvei toggle på "Allow users without an email" her — men da
+    mister du email som primær identifikator i Supabase.
+
 ### Fase 9 – Verifiser
 
-33. Hard-reload deployed app → registrer en testkonto med epost
-34. Sjekk at verifiserings-mailen kommer
-35. Logg inn med Google → verifiser i appen at sesjonen settes
-36. Logg inn med Microsoft → samme
-37. Hvis Microsoft feiler: gå til Supabase Dashboard → Logs → Auth Logs.
+34. Hard-reload deployed app → registrer en testkonto med epost
+35. Sjekk at verifiserings-mailen kommer
+36. Logg inn med Google → verifiser i appen at sesjonen settes
+37. Logg inn med Microsoft → samme
+38. Hvis Microsoft feiler: gå til Supabase Dashboard → Logs → Auth Logs.
     Hvis du ser `/callback | 500: Error getting user email from external
-    provider` betyr det fortsatt manglende email-scope — gjenta steg 30.
-38. Verifiser per-bruker isolasjon: registrer en konto B, opprett data,
+    provider`:
+    - Verifiser at `email`-permission er i API permissions (steg 30)
+    - Verifiser at `email`-claim er i Token configuration (steg 31)
+    - Begge må være på plass — den ene uten den andre er ikke nok.
+39. Verifiser per-bruker isolasjon: registrer en konto B, opprett data,
     logg inn som A, sjekk at data fra B ikke vises.
 
 ## Hva du ALDRI gjør (lærte det på den harde måten)
@@ -177,8 +198,11 @@ Fjern utdaterte: `APP_PASSWORD_HASH`, `SESSION_SECRET`.
   Bruk `jose` + JWKS.
 - ❌ Bundle `connect-pg-simple`, `pdf-parse` eller andre pakker som leser
   filer relativt til `__dirname` — esbuild knekker dem.
-- ❌ Glem å legge til `email`-scope i Azure API permissions. Uten den
-  feiler Microsoft-login lydløst.
+- ❌ Glem å legge til `email`-scope i Azure API permissions ELLER
+  `email` som optional claim i Azure Token configuration. Begge er
+  nødvendige — permissions sier hva appen får be om, token configuration
+  sier hva som faktisk kommer med i ID-tokenet. Mangler én av dem,
+  feiler Microsoft-login lydløst med 500.
 - ❌ Gjenbruk Google Cloud-prosjekt mellom apper — consent-skjermen er
   prosjekt-global og brukerne ser feil app-navn.
 - ❌ Skriv per-bruker-data (meetings, etc.) uten `user_id`. Skjema må ha
