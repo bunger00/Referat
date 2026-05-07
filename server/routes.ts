@@ -1154,7 +1154,7 @@ ${transcript}`;
             { role: "user", content: userContent }
           ],
           response_format: { type: "json_object" },
-          max_tokens: 2000,
+          max_tokens: 2500,
           temperature,
         });
 
@@ -1295,35 +1295,48 @@ Returner tom array hvis ingen avvik mot møtedokumentene er funnet.` : ""}`;
             { role: "user", content: userContent }
           ],
           response_format: { type: "json_object" },
-          max_tokens: 1000,
+          max_tokens: 2500,
           temperature,
         });
-        
+
         const content = response.choices[0]?.message?.content;
-        console.log("GPT response:", content);
-        
+        const finishReason = response.choices[0]?.finish_reason;
+        console.log("GPT response:", content?.slice(0, 300), "finish:", finishReason);
+
         if (!content) {
           console.log("Analyze: No content from GPT");
           return res.json({ questions: [], warnings: [], actions: [] });
         }
-        
+
         let result;
         try {
           result = JSON.parse(content);
         } catch (parseError) {
-          console.error("JSON parsing error:", parseError);
-          console.error("Raw content:", content);
-          
-          const lines = content.split("\n").filter((line: string) => line.trim().match(/^\d+\./));
-          if (lines.length > 0) {
-            const fallbackQuestions = lines.map((line: string) => line.replace(/^\d+\.\s*/, "").trim()).slice(0, 3);
-            return res.json({ questions: fallbackQuestions, warnings: [], actions: [] });
+          console.error("JSON parsing error:", parseError, "finish:", finishReason);
+          console.error("Raw content (first 500):", content.slice(0, 500));
+
+          // Hvis output ble truncated (finish_reason === "length"), prøv å reparere
+          // ved å klippe til siste komplette objekt og lukke arrays/object-trær.
+          const repaired = tryRepairTruncatedJson(content);
+          if (repaired) {
+            try {
+              result = JSON.parse(repaired);
+              console.log("Reparert truncated JSON OK");
+            } catch {
+              /* fortsett til fallback */
+            }
           }
-          
-          return res.status(500).json({ 
-            error: "Kunne ikke tolke AI-svar", 
-            details: "JSON-parsing feilet" 
-          });
+
+          if (!result) {
+            const lines = content.split("\n").filter((line: string) => line.trim().match(/^\d+\./));
+            if (lines.length > 0) {
+              const fallbackQuestions = lines.map((line: string) => line.replace(/^\d+\.\s*/, "").trim()).slice(0, 3);
+              return res.json({ questions: fallbackQuestions, warnings: [], actions: [] });
+            }
+            // Returner tomme arrays heller enn 500 — bedre brukeropplevelse
+            console.warn("Analyze: ga opp parsing — returnerer tomt resultat");
+            return res.json({ questions: [], warnings: [], actions: [], decisions: [] });
+          }
         }
         
         const questions = result.questions || [];
@@ -2946,6 +2959,70 @@ Returner JSON med:
   });
 
   return httpServer;
+}
+
+/**
+ * Forsøker å reparere JSON som ble kuttet midt i (typisk når GPT treffer
+ * max_tokens). Klipper til siste komma/objekt-grense og lukker
+ * gjenstående { [ med } ]. Best-effort — returnerer null hvis det ikke gir
+ * gyldig JSON.
+ */
+function tryRepairTruncatedJson(raw: string): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  // Strip eventuell markdown code fence
+  s = s.replace(/^```(json)?\s*/i, "").replace(/```\s*$/i, "");
+
+  // Tell ulukkede strukturer
+  let inString = false;
+  let escape = false;
+  const stack: string[] = [];
+  let lastSafeIdx = -1;
+
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") stack.pop();
+
+    if (stack.length > 0 && (c === "," || c === "}" || c === "]")) {
+      lastSafeIdx = i;
+    }
+  }
+
+  // Hvis vi er midt i en streng, klipp ved siste sikre punkt
+  let truncated = s;
+  if (inString && lastSafeIdx > 0) {
+    truncated = s.slice(0, lastSafeIdx + 1);
+    // Telle igjen
+    inString = false;
+    escape = false;
+    stack.length = 0;
+    for (let i = 0; i < truncated.length; i++) {
+      const c = truncated[i];
+      if (escape) { escape = false; continue; }
+      if (c === "\\") { escape = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === "{" || c === "[") stack.push(c);
+      else if (c === "}" || c === "]") stack.pop();
+    }
+  }
+
+  // Fjern hengende komma før vi lukker
+  truncated = truncated.replace(/,\s*$/, "");
+
+  // Lukk gjenstående
+  while (stack.length > 0) {
+    const open = stack.pop()!;
+    truncated += open === "{" ? "}" : "]";
+  }
+
+  return truncated;
 }
 
 function buildInterviewSystemPrompt(industry: string): string {
