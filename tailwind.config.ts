@@ -6,11 +6,12 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        '2xl': "1rem",      /* 16px — hovedpaneler */
-        xl: ".875rem",       /* 14px — kort */
-        lg: "var(--radius)", /* 12px */
-        md: "calc(var(--radius) - 4px)", /* 8px */
-        sm: "calc(var(--radius) - 8px)", /* 4px */
+        '2xl': "1.125rem",   /* 18px — Apple lg */
+        xl: ".875rem",       /* 14px */
+        lg: "var(--radius)", /* 11px — Apple md */
+        md: "0.5rem",        /* 8px — Apple sm */
+        sm: "0.3125rem",     /* 5px — Apple xs */
+        pill: "9999px",      /* Apple sin signature pill-shape på knapper */
       },
       boxShadow: {
         '2xs': "var(--shadow-2xs)",
