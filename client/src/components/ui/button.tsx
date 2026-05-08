@@ -5,9 +5,9 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  // Apple-style: pill-shape (rounded-full) på alle knapper unntatt icon (rounded-md beholdes via size).
-  // Fjernet shadow-xs på outline siden Apple ikke bruker shadows på chrome.
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0" +
+  // Claude-style: rounded-md (8px) på alle knapper. Pill kun for sirkulære
+  // icon-knapper. Coral primary med subtil hover.
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0" +
   " hover-elevate active-elevate-2 transition-colors",
   {
     variants: {
@@ -17,17 +17,16 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive text-destructive-foreground border border-destructive-border",
         outline:
-          " border [border-color:var(--button-outline)] active:bg-foreground/[0.04]",
+          " border [border-color:var(--button-outline)] shadow-xs active:shadow-none",
         secondary:
           "border bg-secondary text-secondary-foreground border border-secondary-border",
         ghost: "border border-transparent",
       },
       size: {
         default: "min-h-10 sm:min-h-9 px-5 py-2",
-        sm: "min-h-9 sm:min-h-8 px-4 text-xs",
+        sm: "min-h-9 sm:min-h-8 px-3 text-xs",
         lg: "min-h-12 px-8 text-base",
-        // Icon-knapper beholder rounded-md (firkantet) for å passe inn i tette UIer
-        icon: "h-10 w-10 sm:h-9 sm:w-9 rounded-md",
+        icon: "h-10 w-10 sm:h-9 sm:w-9",
       },
     },
     defaultVariants: {
