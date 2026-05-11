@@ -20,7 +20,7 @@ export const LiveTranscript = forwardRef<HTMLDivElement, Props>(function LiveTra
   scrollRef
 ) {
   return (
-    <section className="flex flex-col h-full min-h-0 border-r border-border bg-card/30">
+    <section className="flex flex-col h-full min-h-0 bg-card/30">
       <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border shrink-0">
         <h2 className="font-display text-sm font-semibold tracking-tightish flex items-center gap-2">
           <Mic className="h-3.5 w-3.5 text-muted-foreground" />

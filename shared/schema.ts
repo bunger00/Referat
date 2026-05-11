@@ -121,6 +121,8 @@ export const meetingSessions = pgTable("meeting_sessions", {
   decisions: jsonb("decisions").$type<ProposedDecision[]>().default([]),
   speakerMappings: jsonb("speaker_mappings").$type<Record<string, string>>().default({}),
   summary: text("summary"),
+  // Brukerens egne stikkord/notater under møtet (Granola-style "primary canvas")
+  userNotes: text("user_notes"),
 }, (t) => ({
   userIdx: index("idx_meeting_sessions_user").on(t.userId),
   seriesIdx: index("idx_meeting_sessions_series").on(t.seriesId),
@@ -215,6 +217,9 @@ export const summaryRequestSchema = z.object({
     secretary: z.string().optional(),
     absent: z.string().optional(),
   }).optional(),
+  // Brukerens egne stikkord/notater fra møtet — skal brukes som primary
+  // struktur av AI når referat genereres.
+  userNotes: z.string().optional(),
   visualContext: z.array(z.object({
     id: z.number(),
     description: z.string(),
