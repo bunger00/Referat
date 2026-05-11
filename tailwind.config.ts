@@ -6,12 +6,13 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        '2xl': "1.125rem",   /* 18px — Apple lg */
-        xl: ".875rem",       /* 14px */
-        lg: "var(--radius)", /* 11px — Apple md */
-        md: "0.5rem",        /* 8px — Apple sm */
-        sm: "0.3125rem",     /* 5px — Apple xs */
-        pill: "9999px",      /* Apple sin signature pill-shape på knapper */
+        '2xl': "1.25rem",    /* 20px — store kort/seksjoner */
+        xl: "1rem",          /* 16px — Claude xl */
+        lg: "0.75rem",       /* 12px — Claude lg, kort */
+        md: "var(--radius)", /* 8px — Claude md, default knapper og inputs */
+        sm: "0.375rem",      /* 6px — Claude sm */
+        xs: "0.25rem",       /* 4px — Claude xs */
+        pill: "9999px",      /* kun for sirkulære icon-knapper */
       },
       boxShadow: {
         '2xs': "var(--shadow-2xs)",

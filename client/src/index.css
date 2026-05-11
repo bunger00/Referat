@@ -3,104 +3,102 @@
 @tailwind utilities;
 
 /*
- * Designsystem: Apple
- * Photography-first interface som lar produktet snakke. Hvit kanvas
- * (eller pearl-parchment), Action Blue som eneste interaksjons-farge,
- * SF Pro Display med negativ letter-spacing, hairlines i stedet for
- * skygger på UI-chrome. Pill-knapper. Se docs/DESIGN.md for full spec.
+ * Designsystem: Claude (Anthropic)
+ * Warm-canvas editorial interface. Tinted cream-bakgrunn (#faf9f5),
+ * serif display-overskrifter (Copernicus / Tiempos / Fraunces fallback),
+ * varm korall CTAs (#cc785c), mørke navy product-overflater. Brand-
+ * voltage fra cream/coral-paringen. Se docs/DESIGN.md for full spec.
  */
 
-/* LIGHT MODE — Apple */
+/* LIGHT MODE — Claude warm cream */
 :root {
-  --button-outline: rgba(0, 0, 0, .08);
-  --badge-outline: rgba(0, 0, 0, .04);
+  --button-outline: rgba(20, 17, 13, .10);
+  --badge-outline: rgba(20, 17, 13, .05);
   --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(0, 0, 0, .03);
-  --elevate-2: rgba(0, 0, 0, .07);
+  --elevate-1: rgba(20, 17, 13, .035);
+  --elevate-2: rgba(20, 17, 13, .08);
 
-  /* Apple kanvas: pearl-parchment (#fafafc/#f5f5f7) for sidebar/section,
-     pure white for kort-overflater. */
-  --background: 240 7% 97%;            /* #f5f5f7 — section parchment */
-  --foreground: 220 9% 12%;             /* #1d1d1f — ink */
-  --border: 0 0% 88%;                   /* #e0e0e0 — hairline */
+  /* Claude tinted cream — varm, vurdert, editorial */
+  --background: 47 38% 97%;             /* #faf9f5 — canvas */
+  --foreground: 60 6% 8%;                /* #141413 — ink */
+  --border: 36 30% 88%;                  /* #e6dfd8 — hairline */
 
-  --card: 0 0% 100%;                    /* pure white */
-  --card-foreground: 220 9% 12%;
-  --card-border: 0 0% 94%;              /* #f0f0f0 — divider-soft */
+  --card: 0 0% 100%;                     /* white card on cream canvas */
+  --card-foreground: 60 6% 8%;
+  --card-border: 36 30% 91%;             /* #ebe6df — hairline-soft */
 
-  --sidebar: 0 0% 98%;                  /* #fafafc — surface-pearl */
-  --sidebar-foreground: 220 9% 12%;
-  --sidebar-border: 0 0% 88%;
-  --sidebar-primary: 211 100% 40%;      /* Action Blue #0066cc */
+  --sidebar: 36 38% 93%;                 /* #f5f0e8 — surface-soft */
+  --sidebar-foreground: 60 6% 8%;
+  --sidebar-border: 36 30% 88%;
+  --sidebar-primary: 17 53% 58%;         /* #cc785c — coral primary */
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 94%;
-  --sidebar-accent-foreground: 220 9% 12%;
-  --sidebar-ring: 211 100% 45%;
+  --sidebar-accent: 36 30% 90%;          /* #efe9de — surface-card */
+  --sidebar-accent-foreground: 60 6% 8%;
+  --sidebar-ring: 17 53% 58%;
 
   --popover: 0 0% 100%;
-  --popover-foreground: 220 9% 12%;
-  --popover-border: 0 0% 88%;
+  --popover-foreground: 60 6% 8%;
+  --popover-border: 36 30% 88%;
 
-  /* Action Blue — den eneste interaksjons-fargen */
-  --primary: 211 100% 40%;              /* #0066cc */
+  /* Coral primary — Claude sin signatur */
+  --primary: 17 53% 58%;                 /* #cc785c */
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 0 0% 94%;
-  --secondary-foreground: 220 9% 12%;
+  --secondary: 36 38% 93%;               /* surface-soft */
+  --secondary-foreground: 60 6% 8%;
 
-  --muted: 240 7% 97%;
-  --muted-foreground: 0 0% 48%;         /* #7a7a7a — ink-muted-48 */
+  --muted: 36 38% 95%;                   /* lighter cream */
+  --muted-foreground: 49 4% 41%;         /* #6c6a64 — muted */
 
-  --accent: 211 100% 45%;               /* #0071e3 — primary-focus */
+  --accent: 17 47% 45%;                  /* #a9583e — primary-active */
   --accent-foreground: 0 0% 100%;
 
-  --destructive: 0 70% 48%;
+  --destructive: 0 53% 53%;              /* #c64545 — error */
   --destructive-foreground: 0 0% 100%;
 
-  /* Semantikk — skarpere, klarere farger som passer med Apple */
-  --success: 142 71% 32%;
+  /* Semantikk — varme, dempede farger som passer cream-paletten */
+  --success: 130 38% 54%;                /* #5db872 */
   --success-foreground: 0 0% 100%;
-  --warning: 35 100% 48%;
+  --warning: 45 81% 47%;                 /* #d4a017 */
   --warning-foreground: 0 0% 100%;
-  --decision: 271 81% 56%;
+  --decision: 173 38% 54%;               /* #5db8a6 — accent-teal */
   --decision-foreground: 0 0% 100%;
-  --suggestion: 211 100% 40%;           /* matcher primary */
-  --suggestion-foreground: 0 0% 100%;
+  --suggestion: 31 74% 63%;              /* #e8a55a — accent-amber */
+  --suggestion-foreground: 60 6% 8%;
 
-  --input: 0 0% 88%;
-  --ring: 211 100% 45%;
+  --input: 36 30% 86%;
+  --ring: 17 53% 58%;
 
-  --chart-1: 211 100% 40%;
-  --chart-2: 271 81% 56%;
-  --chart-3: 142 71% 32%;
-  --chart-4: 35 100% 48%;
-  --chart-5: 0 0% 60%;
+  --chart-1: 17 53% 58%;
+  --chart-2: 173 38% 54%;
+  --chart-3: 31 74% 63%;
+  --chart-4: 130 38% 54%;
+  --chart-5: 49 4% 41%;
 
-  /* SF Pro Display + SF Pro Text — Apple sin egen typografi.
-     System-ui-fallback for ikke-Apple-enheter. */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  /* Claude-typografi: serif for display (editorial), sans for body.
+     Copernicus og Tiempos er paid — Fraunces er gratis og nær i feel. */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Fraunces', 'Tiempos Headline', Georgia, serif;
   --font-serif: Georgia, serif;
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  /* Apple bruker små radii på chrome (8-11px) men pill (full) på knapper */
-  --radius: 0.6875rem;                  /* 11px — Apple md */
+  /* Claude radii: små på chrome (4-12px), pill kun for sirkulære icon-knapper */
+  --radius: 0.5rem;                      /* 8px — Claude md (default for buttons/inputs) */
   --radius-pill: 9999px;
-  --tracking-display: -0.025em;         /* SF Display har innebygd negativ tracking */
-  --tracking-tight: -0.011em;
+  --tracking-display: -0.022em;
+  --tracking-tight: -0.01em;
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
-  /* Apple bruker IKKE shadows på UI-chrome — kun én signature drop-shadow
-     under produkter. Vi beholder skala men dramatisk redusert. */
-  --shadow-2xs: 0 0 0 1px rgb(0 0 0 / 0.04);
-  --shadow-xs: 0 0 0 1px rgb(0 0 0 / 0.04);
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
-  --shadow: 0 2px 8px -2px rgb(0 0 0 / 0.06);
-  --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.08);
-  --shadow-lg: 0 12px 40px -12px rgb(0 0 0 / 0.12);
-  --shadow-xl: 0 24px 64px -16px rgb(0 0 0 / 0.16);
-  --shadow-2xl: 0 40px 80px -20px rgb(0 0 0 / 0.20);
+  /* Skygger med varm tone (Claude bruker subtil dybde) */
+  --shadow-2xs: 0 1px 1px 0 rgb(20 17 13 / 0.03);
+  --shadow-xs: 0 1px 2px 0 rgb(20 17 13 / 0.04);
+  --shadow-sm: 0 1px 2px 0 rgb(20 17 13 / 0.04), 0 1px 1px 0 rgb(20 17 13 / 0.03);
+  --shadow: 0 2px 6px -1px rgb(20 17 13 / 0.06), 0 1px 2px 0 rgb(20 17 13 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(20 17 13 / 0.07), 0 2px 4px -2px rgb(20 17 13 / 0.05);
+  --shadow-lg: 0 12px 32px -8px rgb(20 17 13 / 0.10), 0 4px 8px -2px rgb(20 17 13 / 0.06);
+  --shadow-xl: 0 24px 48px -12px rgb(20 17 13 / 0.14), 0 8px 16px -4px rgb(20 17 13 / 0.08);
+  --shadow-2xl: 0 36px 72px -16px rgb(20 17 13 / 0.20);
 
   /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
@@ -125,77 +123,77 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
-/* DARK MODE — Apple tile-svart */
+/* DARK MODE — Claude dark navy (#181715) */
 .dark {
-  --button-outline: rgba(255, 255, 255, .08);
-  --badge-outline: rgba(255, 255, 255, .04);
+  --button-outline: rgba(250, 249, 245, .08);
+  --badge-outline: rgba(250, 249, 245, .04);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255, 255, 255, .04);
-  --elevate-2: rgba(255, 255, 255, .08);
+  --elevate-1: rgba(250, 249, 245, .04);
+  --elevate-2: rgba(250, 249, 245, .08);
 
-  /* Apple bruker pure black for hero, og dempet tile (#272729/#2a2a2c) for kort */
-  --background: 0 0% 0%;                /* surface-black */
-  --foreground: 0 0% 100%;
-  --border: 0 0% 18%;
+  /* Claude bruker mørk navy/charcoal (#181715) som hero, med tile #252320 for kort */
+  --background: 48 14% 9%;               /* #181715 — surface-dark */
+  --foreground: 47 38% 97%;              /* #faf9f5 — on-dark */
+  --border: 48 14% 18%;
 
-  --card: 240 2% 16%;                   /* #272729 — surface-tile-1 */
-  --card-foreground: 0 0% 100%;
-  --card-border: 0 0% 22%;
+  --card: 30 11% 13%;                    /* #252320 — surface-dark-elevated */
+  --card-foreground: 47 38% 97%;
+  --card-border: 48 14% 20%;
 
-  --sidebar: 240 2% 14%;
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-border: 0 0% 20%;
-  --sidebar-primary: 211 100% 58%;      /* #2997ff — primary-on-dark */
-  --sidebar-primary-foreground: 0 0% 0%;
-  --sidebar-accent: 240 2% 20%;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 211 100% 60%;
+  --sidebar: 48 14% 11%;                 /* #1f1e1b — surface-dark-soft */
+  --sidebar-foreground: 47 38% 97%;
+  --sidebar-border: 48 14% 18%;
+  --sidebar-primary: 17 53% 65%;         /* coral — lysere på mørk bakgrunn */
+  --sidebar-primary-foreground: 60 6% 8%;
+  --sidebar-accent: 30 11% 17%;
+  --sidebar-accent-foreground: 47 38% 97%;
+  --sidebar-ring: 17 53% 65%;
 
-  --popover: 240 2% 16%;
-  --popover-foreground: 0 0% 100%;
-  --popover-border: 0 0% 20%;
+  --popover: 30 11% 13%;
+  --popover-foreground: 47 38% 97%;
+  --popover-border: 48 14% 20%;
 
-  --primary: 211 100% 58%;              /* #2997ff */
-  --primary-foreground: 0 0% 0%;
+  --primary: 17 53% 65%;                 /* coral lysere på mørk */
+  --primary-foreground: 60 6% 8%;
 
-  --secondary: 240 2% 20%;
-  --secondary-foreground: 0 0% 100%;
+  --secondary: 30 11% 17%;
+  --secondary-foreground: 47 38% 97%;
 
-  --muted: 240 2% 14%;
-  --muted-foreground: 0 0% 80%;         /* #cccccc — body-muted */
+  --muted: 48 14% 13%;
+  --muted-foreground: 39 6% 60%;         /* #a09d96 — on-dark-soft */
 
-  --accent: 211 100% 58%;
-  --accent-foreground: 0 0% 0%;
+  --accent: 17 53% 70%;
+  --accent-foreground: 60 6% 8%;
 
-  --destructive: 0 70% 58%;
+  --destructive: 0 53% 60%;
   --destructive-foreground: 0 0% 100%;
 
-  --success: 142 71% 50%;
-  --success-foreground: 0 0% 0%;
-  --warning: 35 100% 60%;
-  --warning-foreground: 0 0% 0%;
-  --decision: 271 81% 70%;
-  --decision-foreground: 0 0% 0%;
-  --suggestion: 211 100% 58%;
-  --suggestion-foreground: 0 0% 0%;
+  --success: 130 38% 60%;
+  --success-foreground: 60 6% 8%;
+  --warning: 45 81% 55%;
+  --warning-foreground: 60 6% 8%;
+  --decision: 173 38% 60%;
+  --decision-foreground: 60 6% 8%;
+  --suggestion: 31 74% 70%;
+  --suggestion-foreground: 60 6% 8%;
 
-  --input: 0 0% 28%;
-  --ring: 211 100% 58%;
+  --input: 48 14% 22%;
+  --ring: 17 53% 65%;
 
-  --chart-1: 211 100% 58%;
-  --chart-2: 271 81% 70%;
-  --chart-3: 142 71% 50%;
-  --chart-4: 35 100% 60%;
-  --chart-5: 0 0% 70%;
+  --chart-1: 17 53% 65%;
+  --chart-2: 173 38% 60%;
+  --chart-3: 31 74% 70%;
+  --chart-4: 130 38% 60%;
+  --chart-5: 39 6% 60%;
 
-  --shadow-2xs: 0 0 0 1px rgb(255 255 255 / 0.04);
-  --shadow-xs: 0 0 0 1px rgb(255 255 255 / 0.06);
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.40);
-  --shadow: 0 2px 8px -2px rgb(0 0 0 / 0.50);
-  --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.55);
-  --shadow-lg: 0 12px 40px -12px rgb(0 0 0 / 0.60);
-  --shadow-xl: 0 24px 64px -16px rgb(0 0 0 / 0.70);
-  --shadow-2xl: 0 40px 80px -20px rgb(0 0 0 / 0.80);
+  --shadow-2xs: 0 1px 1px 0 rgb(0 0 0 / 0.40);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.45), 0 1px 1px 0 rgb(0 0 0 / 0.30);
+  --shadow: 0 2px 6px -1px rgb(0 0 0 / 0.50), 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.40);
+  --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.60), 0 4px 8px -2px rgb(0 0 0 / 0.40);
+  --shadow-xl: 0 24px 48px -12px rgb(0 0 0 / 0.70), 0 8px 16px -4px rgb(0 0 0 / 0.50);
+  --shadow-2xl: 0 36px 72px -16px rgb(0 0 0 / 0.80);
 
   /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
