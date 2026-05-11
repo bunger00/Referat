@@ -5,6 +5,7 @@ import {
   LiveTranscript,
   MeetingTopbar,
   MeetingBottombar,
+  UserNotesPane,
 } from "@/components/meeting";
 import { ScreenshotGallery } from "@/components/meeting/ScreenshotGallery";
 import { useScreenCapture } from "@/hooks/use-screen-capture";
@@ -239,6 +240,12 @@ export default function MeetingPage() {
   const [isCleaningTranscript, setIsCleaningTranscript] = useState(false);
   const [lastTranscriptCleanup, setLastTranscriptCleanup] = useState<Date | null>(null);
   const [meetingMeta, setMeetingMeta] = useState<MeetingMeta>({});
+
+  // Brukerens egne notater under møtet (Granola-style "primary canvas").
+  // Persisteres til localStorage og DB, sendes til AI som primary kontekst
+  // ved referat-generering.
+  const [userNotes, setUserNotes] = useState<string>("");
+  const [leftPaneTab, setLeftPaneTab] = useState<"transcript" | "notes">("transcript");
   const [metaOpen, setMetaOpen] = useState(false);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const desktopScrollRef = useRef<HTMLDivElement>(null);
@@ -433,6 +440,7 @@ export default function MeetingPage() {
       }
       if (stored.sessionId) setSessionId(stored.sessionId);
       if (stored.sessionTitle) setSessionTitle(stored.sessionTitle);
+      if ((stored as any).userNotes) setUserNotes((stored as any).userNotes);
 
       // Backfill: if localStorage has a summary for a saved session, push it to DB
       if (stored.sessionId && stored.summary) {
@@ -473,8 +481,11 @@ export default function MeetingPage() {
       seriesName: seriesName || undefined,
       summary: meetingSummary || undefined,
     };
+    // Lagre brukernotater i samme localStorage-objekt (schema-typesikkerhet
+    // ofres bevisst med casting; state-objektet er bruker-private uansett).
+    (state as any).userNotes = userNotes || undefined;
     saveToStorage(state);
-  }, [transcript, questions, proposedActions, proposedDecisions, startTime, elapsedSeconds, speakerMappings, expertRole, questionInterval, sessionId, sessionTitle, meetingMeta, seriesId, seriesName, meetingSummary]);
+  }, [transcript, questions, proposedActions, proposedDecisions, startTime, elapsedSeconds, speakerMappings, expertRole, questionInterval, sessionId, sessionTitle, meetingMeta, seriesId, seriesName, meetingSummary, userNotes]);
 
   // Rule checking every 10 seconds during recording
   useEffect(() => {
@@ -1952,6 +1963,7 @@ export default function MeetingPage() {
         approvedActions: approvedActionItems.length > 0 ? approvedActionItems : undefined,
         confirmedDecisions: confirmedDecisionItems.length > 0 ? confirmedDecisionItems : undefined,
         metadata,
+        userNotes: userNotes.trim().length > 0 ? userNotes.trim() : undefined,
         visualContext: includedShots.length > 0 ? includedShots.map(s => ({
           id: s.id,
           description: s.description,
@@ -2270,6 +2282,7 @@ export default function MeetingPage() {
           expertRole,
           questionInterval,
           summary: meetingSummary || undefined,
+          userNotes: userNotes || undefined,
           seriesId: resolvedSeriesId,
           seriesName: resolvedSeriesName || null,
         });
@@ -2317,6 +2330,7 @@ export default function MeetingPage() {
           seriesIndex,
           seriesName: resolvedSeriesName || null,
           summary: meetingSummaryRef.current || undefined,
+          userNotes: userNotes || undefined,
         });
         
         toast({
@@ -2384,6 +2398,7 @@ export default function MeetingPage() {
       if (session.questionInterval !== undefined) setQuestionInterval(session.questionInterval);
       setMeetingSummary(session.summary || "");
       meetingSummaryRef.current = session.summary || "";
+      setUserNotes(session.userNotes || "");
       setSessionId(id);
       setSessionTitle(session.title || "");
       setShowSessionsDialog(false);
@@ -3057,17 +3072,48 @@ export default function MeetingPage() {
 
       {/* Main work area */}
       <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(0,42%)_minmax(0,58%)] overflow-hidden">
-        <div className={"min-h-0 flex flex-col " + (mobileWorkspaceTab === "transcript" ? "" : "hidden lg:flex")}>
-          <LiveTranscript
-            ref={desktopScrollRef}
-            segments={transcript}
-            isRecording={isRecording}
-            isCleaning={isCleaningTranscript}
-            audioLevels={audioLevelBars}
-            onCleanTranscript={() => cleanTranscriptNow(transcript)}
-            onSelectionChange={handleTranscriptMouseUp}
-            endRef={desktopTranscriptEndRef}
-          />
+        <div className={"min-h-0 flex flex-col border-r border-border " + (mobileWorkspaceTab === "transcript" ? "" : "hidden lg:flex")}>
+          {/* Tab-toggle Transkript / Mine notater. AI tar inn notatene som primær
+              struktur når referatet genereres. */}
+          <div className="shrink-0 flex items-center gap-0.5 border-b border-border bg-card/30 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => setLeftPaneTab("transcript")}
+              className={"flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium rounded-md transition-colors " + (leftPaneTab === "transcript" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
+            >
+              Transkript
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeftPaneTab("notes")}
+              className={"flex-1 sm:flex-none px-3 py-1.5 text-xs font-medium rounded-md transition-colors inline-flex items-center justify-center gap-1.5 " + (leftPaneTab === "notes" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
+            >
+              Mine notater
+              {userNotes.trim().length > 0 ? (
+                <span className="inline-flex items-center justify-center rounded-full bg-primary/15 text-primary px-1.5 py-0 min-w-[1.25rem] h-[1.25rem] text-[10px] font-semibold">
+                  ●
+                </span>
+              ) : null}
+            </button>
+          </div>
+          {leftPaneTab === "transcript" ? (
+            <LiveTranscript
+              ref={desktopScrollRef}
+              segments={transcript}
+              isRecording={isRecording}
+              isCleaning={isCleaningTranscript}
+              audioLevels={audioLevelBars}
+              onCleanTranscript={() => cleanTranscriptNow(transcript)}
+              onSelectionChange={handleTranscriptMouseUp}
+              endRef={desktopTranscriptEndRef}
+            />
+          ) : (
+            <UserNotesPane
+              value={userNotes}
+              onChange={setUserNotes}
+              isRecording={isRecording}
+            />
+          )}
         </div>
         <div className={"min-h-0 flex flex-col " + (mobileWorkspaceTab === "ai" ? "" : "hidden lg:flex")}>
           <AIWorkbench

@@ -1665,7 +1665,7 @@ Hvis ingen advarsler: { "warnings": [] }`;
         return res.status(400).json({ error: "Ugyldig forespørsel", details: parsed.error.issues });
       }
       
-      const { transcript, savedQuestions, seriesSummaries, approvedActions, pendingActions, confirmedDecisions, metadata, visualContext } = parsed.data;
+      const { transcript, savedQuestions, seriesSummaries, approvedActions, pendingActions, confirmedDecisions, metadata, visualContext, userNotes } = parsed.data;
       
       if (!transcript || transcript.trim().length === 0) {
         return res.json({ summary: "Ingen transkript å oppsummere." });
@@ -1712,6 +1712,12 @@ Hvis ingen advarsler: { "warnings": [] }`;
       
       const metadataSection = metadata ? `\n\nMetadata:\n${JSON.stringify(metadata, null, 2)}` : "";
 
+      // Brukerens egne stikkord-notater fra møtet — Granola-style "primary canvas".
+      // Disse skal være den PRIMÆRE strukturen i referatet, transkript fyller på.
+      const userNotesSection = (userNotes && userNotes.trim().length > 0)
+        ? `\n\nBRUKERENS EGNE NOTATER FRA MØTET (PRIMÆR STRUKTUR — VIKTIG!):\nBrukeren har skrevet disse stikkordene/notatene UNDER møtet. De representerer hva brukeren mener er VIKTIGST. Bruk dem som primær struktur for referatet:\n\n- Hvert stikkord/punkt skal komme MED i referatet (ikke ignorer noe)\n- Bevar brukerens egne ord og formuleringer der det gir mening\n- Bruk transkriptet til å EKSPANDERE og kontekstualisere stikkordene — fylle inn detaljer som mangler\n- Når brukerens notater nevner et tema, gjør det til en seksjon i referatet (ofte under Hovedtemaer)\n- Hvis transkriptet inneholder noe viktig som IKKE er i brukerens notater, ta det også med — men prioriter brukerens egen prioritering\n\n--- BRUKERENS NOTATER ---\n${userNotes.trim()}\n--- SLUTT BRUKERENS NOTATER ---`
+        : "";
+
       const visualContextSection = (visualContext && visualContext.length > 0)
         ? `\n\nVISUELL KONTEKST (skjermbilder fra møtet, AI-tolkede beskrivelser):\nDisse skal vises som inline bilder i referatet med markdown-syntaks \`![beskrivelse](screenshot:ID)\` der ID er bilde-IDen. Plasser dem ved siden av relevante avsnitt der innholdet diskuteres. Bruk beskrivelsen for å forstå konteksten i samtalen — ofte refererer transkriptet til "som dere ser her" eller "på denne tegningen", og det er disse bildene de mente.\n\n${visualContext.map(v => `- ID ${v.id} (kl ${new Date(v.capturedAt).toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}): ${v.description}`).join("\n")}`
         : "";
@@ -1722,8 +1728,9 @@ You receive:
 1) A full meeting transcript (often noisy, with some small talk and transcription errors).
 2) Optional metadata as JSON (user-provided fields take priority over anything inferred from the transcript).
 3) Optional saved questions from the meeting.
-4) Optional confirmed decisions and action items from the meeting.${hasSeries ? `
-5) Summaries of PREVIOUS meetings in the same series — use these ONLY for the cross-meeting contradiction section (Section 6). Do NOT let previous meetings dominate the minutes for THIS meeting.` : ""}
+4) Optional confirmed decisions and action items from the meeting.
+5) **OPTIONAL — BUT HIGHEST PRIORITY WHEN PROVIDED — BRUKERENS EGNE NOTATER**: Hvis det finnes en seksjon "BRUKERENS EGNE NOTATER FRA MØTET" i brukermeldingen, er disse stikkordene VIKTIGERE enn transkriptet for å bestemme hva som havner i referatet. Bruk transkriptet til å EKSPANDERE brukerens stikkord, ikke til å konkurrere med dem.${hasSeries ? `
+6) Summaries of PREVIOUS meetings in the same series — use these ONLY for the cross-meeting contradiction section. Do NOT let previous meetings dominate the minutes for THIS meeting.` : ""}
 
 Your task:
 Turn the transcript into a clear, structured Norwegian meeting minutes document that is:
@@ -1839,7 +1846,7 @@ Omit this section entirely if no previous meeting summaries were provided.` : ""
           },
           {
             role: "user",
-            content: `Her er transkripsjonen fra møtet:\n\n${transcript}${questionsSection}${actionsSection}${decisionsSection}${metadataSection}${visualContextSection}${seriesContextForSummary}`
+            content: `Her er transkripsjonen fra møtet:\n\n${transcript}${questionsSection}${actionsSection}${decisionsSection}${metadataSection}${userNotesSection}${visualContextSection}${seriesContextForSummary}`
           }
         ],
         max_tokens: 4500,
@@ -2359,6 +2366,7 @@ Vær SVÆRT konkret. Unngå vage beskrivelser. Sitér faktiske endringer.`,
       if (req.body.decisions !== undefined) updates.decisions = req.body.decisions;
       if (req.body.speakerMappings !== undefined) updates.speakerMappings = req.body.speakerMappings;
       if (req.body.summary !== undefined) updates.summary = req.body.summary;
+      if (req.body.userNotes !== undefined) updates.userNotes = req.body.userNotes;
       if (req.body.seriesId !== undefined) updates.seriesId = req.body.seriesId;
       if (req.body.seriesIndex !== undefined) updates.seriesIndex = req.body.seriesIndex;
 

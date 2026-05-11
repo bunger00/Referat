@@ -5,5 +5,6 @@ export { QuestionCard } from "./QuestionCard";
 export { ManualAddInline } from "./ManualAddInline";
 export { AIWorkbench } from "./AIWorkbench";
 export { LiveTranscript } from "./LiveTranscript";
+export { UserNotesPane } from "./UserNotesPane";
 export { MeetingTopbar } from "./MeetingTopbar";
 export { MeetingBottombar } from "./MeetingBottombar";
