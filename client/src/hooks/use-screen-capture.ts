@@ -72,8 +72,10 @@ export function useScreenCapture() {
     const video = videoRef.current;
     if (!active || !video || video.videoWidth === 0) return null;
 
-    // Skaler ned hvis kjempestort — sparer base64-størrelse uten å miste relevant detalj
-    const MAX_DIM = 1600;
+    // Skaler ned hvis kjempestort — sparer base64-størrelse uten å miste relevant detalj.
+    // 1280px @ quality 0.72 gir typisk 200-500KB base64, godt under HTTP/2-frame-grenser
+    // og Render-proxy-buffere. 1600px @ 0.85 ga 3-5MB som trigget ERR_HTTP2_PROTOCOL_ERROR.
+    const MAX_DIM = 1280;
     const scale = Math.min(1, MAX_DIM / Math.max(video.videoWidth, video.videoHeight));
     const w = Math.round(video.videoWidth * scale);
     const h = Math.round(video.videoHeight * scale);
@@ -84,8 +86,7 @@ export function useScreenCapture() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, w, h);
-    // JPEG quality 0.85 gir god kvalitet for plantegninger og 3D, holder filstørrelse rimelig
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
     return { dataUrl, width: w, height: h };
   }, [active]);
 
