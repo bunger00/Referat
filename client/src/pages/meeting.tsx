@@ -2443,21 +2443,52 @@ export default function MeetingPage() {
   }, [sessionId]);
 
   const captureScreenshot = useCallback(async () => {
-    if (!screenCapture.active) return;
+    if (!screenCapture.active) {
+      toast({ title: "Skjermdeling ikke aktiv", description: "Start skjermdeling først.", variant: "destructive" });
+      return;
+    }
     setIsCapturingShot(true);
     try {
       const frame = await screenCapture.capture();
       if (!frame) {
-        toast({ title: "Kunne ikke fange skjermbilde", variant: "destructive" });
+        toast({
+          title: "Kunne ikke fange skjermbilde",
+          description: "Vinduet du deler kan være minimert eller skjult. Bytt til vinduet og prøv igjen.",
+          variant: "destructive",
+        });
         return;
       }
       // Hent siste ~15 segmenter som kontekst for vision-tolkningen
       const recent = transcriptForVisionRef.current.slice(-15).map(s => s.text).join(" ");
-      const analyzeRes = await authFetch("/api/screenshots/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageData: frame.dataUrl, mimeType: "image/jpeg", recentTranscript: recent }),
-      });
+      const body = JSON.stringify({ imageData: frame.dataUrl, mimeType: "image/jpeg", recentTranscript: recent });
+
+      // Retry med eksponensiell backoff — vision-API kan være tregt og store payloads
+      // kan tidvis feile over HTTP/2 hvis nettet er ustabilt.
+      let analyzeRes: Response | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          analyzeRes = await authFetch("/api/screenshots/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
+          if (analyzeRes.ok) break;
+          // 5xx → retry, 4xx → ikke retry (auth/validation-feil)
+          if (analyzeRes.status < 500) break;
+        } catch (e) {
+          lastErr = e;
+        }
+        if (attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      }
+      if (!analyzeRes) {
+        toast({
+          title: "Nettverksfeil",
+          description: `Kunne ikke nå serveren${lastErr instanceof Error ? `: ${lastErr.message}` : ""}. Sjekk nett og prøv igjen.`,
+          variant: "destructive",
+        });
+        return;
+      }
       if (!analyzeRes.ok) {
         const txt = await analyzeRes.text();
         toast({ title: "Vision-feil", description: txt.slice(0, 200), variant: "destructive" });
