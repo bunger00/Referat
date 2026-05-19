@@ -37,6 +37,7 @@ type Props = {
 
   /* Action handlers */
   onApproveAction: (id: string, edits: { text: string; owner: string; deadline: string }) => void;
+  onUpdateApprovedAction: (id: string, edits: { text: string; owner: string; deadline: string }) => void;
   onRejectAction: (id: string) => void;
   onMoveActionToDecision: (id: string) => void;
   onRemoveApprovedAction: (id: string) => void;
@@ -44,6 +45,7 @@ type Props = {
 
   /* Decision handlers */
   onConfirmDecision: (id: string, edits: { text: string }) => void;
+  onUpdateConfirmedDecision: (id: string, edits: { text: string }) => void;
   onRejectDecision: (id: string) => void;
   onMoveDecisionToAction: (id: string) => void;
   onRemoveConfirmedDecision: (id: string) => void;
@@ -153,6 +155,7 @@ export function AIWorkbench(p: Props) {
                     action={a}
                     index={i}
                     onApprove={p.onApproveAction}
+                    onUpdate={p.onUpdateApprovedAction}
                     onReject={p.onRejectAction}
                     onMoveToDecision={p.onMoveActionToDecision}
                     onRemove={p.onRemoveApprovedAction}
@@ -197,6 +200,7 @@ export function AIWorkbench(p: Props) {
                     decision={d}
                     index={i}
                     onConfirm={p.onConfirmDecision}
+                    onUpdate={p.onUpdateConfirmedDecision}
                     onReject={p.onRejectDecision}
                     onMoveToAction={p.onMoveDecisionToAction}
                     onRemove={p.onRemoveConfirmedDecision}
