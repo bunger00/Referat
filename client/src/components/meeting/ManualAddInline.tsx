@@ -59,7 +59,7 @@ export function ManualAddInline(props: Props) {
   return (
     <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-warning-foreground">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-warning">
           Manuelt {props.kind === "action" ? "aksjonspunkt" : "beslutning"}
         </span>
         <Button variant="ghost" size="icon" onClick={reset} className="h-6 w-6">

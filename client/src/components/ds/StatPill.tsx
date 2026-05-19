@@ -13,7 +13,7 @@ type Props = {
 const TONE_CLASSES: Record<Tone, string> = {
   neutral: "bg-muted text-muted-foreground border-border",
   success: "bg-success/10 text-success border-success/30",
-  warning: "bg-warning/15 text-warning-foreground border-warning/40",
+  warning: "bg-warning/15 text-warning border-warning/40",
   decision: "bg-decision/12 text-decision border-decision/30",
   suggestion: "bg-suggestion/10 text-suggestion border-suggestion/30",
   accent: "bg-accent/12 text-accent border-accent/30",
