@@ -1162,6 +1162,28 @@ export default function MeetingPage() {
     toast({ title: "Beslutning bekreftet" });
   };
 
+  // Re-edit av allerede godkjent/bekreftet item: bevarer status, oppdaterer kun feltene.
+  // Brukes når bruker oppdager en feil ETTER at de har godkjent/bekreftet.
+  const inlineUpdateApprovedAction = (id: string, edits: { text: string; owner: string; deadline: string }) => {
+    const finalText = edits.text.trim();
+    setProposedActions(prev => prev.map(a =>
+      a.id === id && a.status === "approved"
+        ? { ...a, text: finalText || a.text, owner: edits.owner.trim() || undefined, deadline: edits.deadline.trim() || undefined }
+        : a
+    ));
+    toast({ title: "Aksjon oppdatert" });
+  };
+
+  const inlineUpdateConfirmedDecision = (id: string, edits: { text: string }) => {
+    const finalText = edits.text.trim();
+    setProposedDecisions(prev => prev.map(d =>
+      d.id === id && d.status === "confirmed"
+        ? { ...d, text: finalText || d.text }
+        : d
+    ));
+    toast({ title: "Beslutning oppdatert" });
+  };
+
   // Henter siste ~20 transkript-segmenter som kontekst for læring når bruker
   // legger til noe manuelt. Tanken er: AI-en så denne teksten men foreslo
   // ikke det brukeren ville ha — server kan analysere "hva burde jeg fanget"
@@ -3159,11 +3181,13 @@ export default function MeetingPage() {
             isRecording={isRecording}
             expertRole={expertRole}
             onApproveAction={inlineApproveAction}
+            onUpdateApprovedAction={inlineUpdateApprovedAction}
             onRejectAction={rejectAction}
             onMoveActionToDecision={moveActionToDecision}
             onRemoveApprovedAction={removeApprovedAction}
             onAddActionManually={inlineAddAction}
             onConfirmDecision={inlineConfirmDecision}
+            onUpdateConfirmedDecision={inlineUpdateConfirmedDecision}
             onRejectDecision={rejectDecision}
             onMoveDecisionToAction={moveDecisionToAction}
             onRemoveConfirmedDecision={removeConfirmedDecision}

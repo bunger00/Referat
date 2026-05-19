@@ -21,6 +21,9 @@ type Props = {
   onReject: (id: string) => void;
   onMoveToAction: (id: string) => void;
   onRemove?: (id: string) => void;
+  /** Re-edit av allerede bekreftet beslutning. Lar bruker rette feil i tekst
+   * uten å nullstille status. Hvis ikke angitt, vises ingen pencil-knapp på bekreftede kort. */
+  onUpdate?: (id: string, edits: { text: string }) => void;
   autoExpand?: boolean;
 };
 
@@ -31,6 +34,7 @@ export function DecisionCard({
   onReject,
   onMoveToAction,
   onRemove,
+  onUpdate,
   autoExpand,
 }: Props) {
   const isConfirmed = decision.status === "confirmed";
@@ -47,20 +51,83 @@ export function DecisionCard({
     if (expanded) requestAnimationFrame(() => textRef.current?.focus());
   }, [expanded]);
 
-  const handleConfirm = () => {
-    onConfirm(decision.id, { text: text.trim() || decision.text });
+  const handleSave = () => {
+    const edits = { text: text.trim() || decision.text };
+    if (isConfirmed) {
+      onUpdate?.(decision.id, edits);
+    } else {
+      onConfirm(decision.id, edits);
+    }
+    setExpanded(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!expanded) return;
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleConfirm();
+      handleSave();
     } else if (e.key === "Escape") {
       e.preventDefault();
       setExpanded(false);
     }
   };
+
+  const editFormJsx = (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-decision">
+        <Pencil className="h-3 w-3" />
+        {isConfirmed ? "Rediger beslutning" : "Rediger og bekreft"}
+      </div>
+      <Textarea
+        ref={textRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Beslutning"
+        className="text-sm font-medium min-h-[60px]"
+        rows={2}
+      />
+      {decision.context ? (
+        <p className="text-xs italic text-muted-foreground border-l-2 border-decision/40 pl-2">
+          "{decision.context}"
+        </p>
+      ) : null}
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
+        <div className="hidden sm:block text-[10px] text-muted-foreground">
+          <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">⌘ Enter</kbd> {isConfirmed ? "lagre" : "bekreft"} ·{" "}
+          <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">Esc</kbd> lukk
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setExpanded(false)}
+            className="h-10 sm:h-8 text-sm sm:text-xs"
+          >
+            Avbryt
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-decision text-decision-foreground hover:bg-decision/90"
+          >
+            <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+            {isConfirmed ? "Lagre" : "Bekreft"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isConfirmed && expanded) {
+    return (
+      <div
+        onKeyDown={handleKeyDown}
+        className="rounded-xl border bg-card p-3 border-decision shadow-sm transition-shadow"
+      >
+        {editFormJsx}
+      </div>
+    );
+  }
 
   if (isConfirmed) {
     return (
@@ -94,17 +161,30 @@ export function DecisionCard({
             <p className="text-xs italic text-muted-foreground">"{decision.context}"</p>
           ) : null}
         </div>
-        {onRemove ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onRemove(decision.id)}
-            aria-label="Fjern beslutning"
-            className="opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {onUpdate ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setExpanded(true)}
+              aria-label="Rediger beslutning"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+          {onRemove ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onRemove(decision.id)}
+              aria-label="Fjern beslutning"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -175,49 +255,7 @@ export function DecisionCard({
           </div>
         </>
       ) : (
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-decision">
-            <Pencil className="h-3 w-3" />
-            Rediger og bekreft
-          </div>
-          <Textarea
-            ref={textRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Beslutning"
-            className="text-sm font-medium min-h-[60px]"
-            rows={2}
-          />
-          {decision.context ? (
-            <p className="text-xs italic text-muted-foreground border-l-2 border-decision/40 pl-2">
-              "{decision.context}"
-            </p>
-          ) : null}
-          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-1">
-            <div className="hidden sm:block text-[10px] text-muted-foreground">
-              <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">⌘ Enter</kbd> bekreft ·{" "}
-              <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">Esc</kbd> lukk
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setExpanded(false)}
-                className="h-10 sm:h-8 text-sm sm:text-xs"
-              >
-                Avbryt
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleConfirm}
-                className="h-10 sm:h-8 px-3 text-sm sm:text-xs gap-1.5 bg-decision text-decision-foreground hover:bg-decision/90"
-              >
-                <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                Bekreft
-              </Button>
-            </div>
-          </div>
-        </div>
+        editFormJsx
       )}
     </div>
   );
