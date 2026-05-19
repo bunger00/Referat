@@ -326,7 +326,7 @@ function WorkbenchTab({
             tone === "success" && "bg-success/15 text-success",
             tone === "decision" && "bg-decision/15 text-decision",
             tone === "suggestion" && "bg-suggestion/15 text-suggestion",
-            tone === "warning" && "bg-warning/20 text-warning-foreground",
+            tone === "warning" && "bg-warning/20 text-warning",
             !tone && "bg-muted text-muted-foreground",
             pulse && "animate-pulse"
           )}
