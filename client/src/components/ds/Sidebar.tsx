@@ -8,6 +8,8 @@ import {
   LogOut,
   Sparkles,
   Gauge,
+  Lightbulb,
+  Brain,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -23,7 +25,9 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/", label: "Hjem", icon: Home, match: (p) => p === "/" },
   { href: "/mote", label: "Møte", icon: Mic, match: (p) => p.startsWith("/mote") || p.startsWith("/m/") },
+  { href: "/erfaring", label: "Erfaringsmøter", icon: Lightbulb, match: (p) => p.startsWith("/erfaring") },
   { href: "/intervju", label: "Intervjutrening", icon: Gauge, match: (p) => p.startsWith("/intervju") },
+  { href: "/hjernen", label: "Hjernen", icon: Brain, match: (p) => p.startsWith("/hjernen") },
   { href: "/historikk", label: "Historikk", icon: History, match: (p) => p.startsWith("/historikk") },
   { href: "/kunnskapsbase", label: "Kunnskapsbase", icon: BookOpen, match: (p) => p.startsWith("/kunnskapsbase") },
   { href: "/innstillinger", label: "Innstillinger", icon: Settings, match: (p) => p.startsWith("/innstillinger") },

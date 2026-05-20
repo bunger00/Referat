@@ -9,6 +9,9 @@ import { analyzeRequestSchema, transcribeRequestSchema, summaryRequestSchema, tr
 import { tryRepairTruncatedJson } from "./lib/json-repair";
 import { mergeDecisions } from "./lib/merge-decisions";
 import { registerInterviewRoutes } from "./routes/interview";
+import { registerExperienceRoutes } from "./routes/experience";
+import { registerLessonsRoutes } from "./routes/lessons";
+import { registerBrainRoutes } from "./routes/brain";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -3191,6 +3194,9 @@ Vær konkret og handlingsorientert. Generelle regler som "fang flere aksjoner" e
   });
 
   registerInterviewRoutes(app);
+  registerExperienceRoutes(app);
+  registerLessonsRoutes(app);
+  registerBrainRoutes(app);
 
 
   return httpServer;

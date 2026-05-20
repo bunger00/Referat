@@ -8,6 +8,7 @@ import NotFound from "@/pages/not-found";
 import HomePage from "@/pages/home";
 import MeetingPage from "@/pages/meeting";
 import InterviewPage from "@/pages/interview";
+import ExperiencePage from "@/pages/experience";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import { supabase } from "@/lib/supabase";
@@ -15,11 +16,12 @@ import { Loader2 } from "lucide-react";
 import { AppShell } from "@/components/ds";
 
 // Sider som ikke er på kritisk vei lastes lazy. Sparer ~30-40% av initial JS-bundle.
-// MeetingPage og InterviewPage holder live opptak — må være eager. HomePage er
-// landings-siden — eager. Login/Signup brukes før shell — eager.
+// MeetingPage, InterviewPage og ExperiencePage holder live opptak — må være
+// eager. HomePage er landings-siden — eager. Login/Signup brukes før shell — eager.
 const HistoryPage = lazy(() => import("@/pages/history"));
 const KnowledgePage = lazy(() => import("@/pages/knowledge"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
+const BrainPage = lazy(() => import("@/pages/brain"));
 
 function PageLoader() {
   return (
@@ -61,14 +63,16 @@ function AuthenticatedRouter() {
       : <LoginPage onLoginSuccess={() => { /* state flips via onAuthStateChange */ }} onSwitchToSignup={() => setShowSignup(true)} />;
   }
 
-  // MeetingPage og InterviewPage holder live opptak (MediaStream, AudioContext,
-  // intervaller) og MÅ stå mountet over ruteendringer slik at brukeren kan navigere
-  // til innstillinger eller historikk midt i et opptak uten å miste pågående
-  // sesjon. Andre sider mounter/unmounter normalt via Switch.
+  // MeetingPage, InterviewPage og ExperiencePage holder live opptak
+  // (MediaStream, AudioContext, intervaller) og MÅ stå mountet over ruteendringer
+  // slik at brukeren kan navigere til innstillinger eller historikk midt i et
+  // opptak uten å miste pågående sesjon. Andre sider mounter/unmounter normalt
+  // via Switch.
   const isMeetingRoute =
     location.startsWith("/mote") || location.startsWith("/m/") || location === "/login";
   const isInterviewRoute = location.startsWith("/intervju");
-  const isRecordingRoute = isMeetingRoute || isInterviewRoute;
+  const isExperienceRoute = location.startsWith("/erfaring");
+  const isRecordingRoute = isMeetingRoute || isInterviewRoute || isExperienceRoute;
 
   return (
     <AppShell>
@@ -78,6 +82,9 @@ function AuthenticatedRouter() {
       <div className={isInterviewRoute ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
         <InterviewPage />
       </div>
+      <div className={isExperienceRoute ? "flex-1 min-h-0 overflow-y-auto" : "hidden"}>
+        <ExperiencePage />
+      </div>
       <div className={!isRecordingRoute ? "flex-1 min-h-0 overflow-y-auto" : "hidden"}>
         <Suspense fallback={<PageLoader />}>
           <Switch>
@@ -85,10 +92,13 @@ function AuthenticatedRouter() {
             <Route path="/historikk" component={HistoryPage} />
             <Route path="/kunnskapsbase" component={KnowledgePage} />
             <Route path="/innstillinger" component={SettingsPage} />
+            <Route path="/hjernen" component={BrainPage} />
             {/* Recording routes are handled by always-mounted pages above. */}
             <Route path="/mote">{null}</Route>
             <Route path="/m/:id">{null}</Route>
             <Route path="/intervju">{null}</Route>
+            <Route path="/erfaring">{null}</Route>
+            <Route path="/erfaring/:id">{null}</Route>
             <Route path="/login">{null}</Route>
             <Route component={NotFound} />
           </Switch>

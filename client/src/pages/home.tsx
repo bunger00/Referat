@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Mic, Upload, History, BookOpen, Calendar, Sparkles, ArrowRight } from "lucide-react";
+import { Mic, Upload, History, BookOpen, Calendar, Sparkles, ArrowRight, Lightbulb, Brain } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState, CTACard, StatPill } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -172,6 +172,41 @@ export default function HomePage() {
             })}
           </div>
         )}
+      </Section>
+
+      <Section title="Erfaring og kunnskap">
+        <div className="grid gap-3 md:grid-cols-2">
+          <Link href="/erfaring">
+            <a className="block">
+              <Panel className="p-5 hover-elevate cursor-pointer flex items-start gap-4">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent/15 text-accent shrink-0">
+                  <Lightbulb className="h-5 w-5" strokeWidth={2} />
+                </span>
+                <div>
+                  <h3 className="font-medium">Erfaringsmøter</h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Last opp et erfaringsmøte. AI ekstraherer lærdommer som mater hjernen din.
+                  </p>
+                </div>
+              </Panel>
+            </a>
+          </Link>
+          <Link href="/hjernen">
+            <a className="block">
+              <Panel className="p-5 hover-elevate cursor-pointer flex items-start gap-4">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/15 text-primary shrink-0">
+                  <Brain className="h-5 w-5" strokeWidth={2} />
+                </span>
+                <div>
+                  <h3 className="font-medium">Spør hjernen</h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Chat med alt du har lært — referater, regler, erfaringer og dokumenter samlet ett sted.
+                  </p>
+                </div>
+              </Panel>
+            </a>
+          </Link>
+        </div>
       </Section>
 
       <Section title="Tilpass appen til deg">

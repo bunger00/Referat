@@ -10,7 +10,7 @@
     "check": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "drizzle-kit push",
+    "db:push": "drizzle-kit push && tsx -r dotenv/config script/apply-extensions.ts",
     "postinstall": "echo 'Tip: copy .env.example to .env and fill in Supabase + OpenAI credentials'"
   },
   "dependencies": {

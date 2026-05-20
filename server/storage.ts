@@ -1,4 +1,4 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, experienceSessions, lessonsLearned, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal, type ExperienceSession, type InsertExperienceSession, type LessonLearned, type InsertLessonLearned } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
@@ -69,6 +69,20 @@ export interface IStorage {
   createMeetingScreenshot(userId: string, data: Omit<InsertMeetingScreenshot, "userId">): Promise<MeetingScreenshot>;
   updateMeetingScreenshot(userId: string, id: number, updates: Record<string, unknown>): Promise<MeetingScreenshot | undefined>;
   deleteMeetingScreenshot(userId: string, id: number): Promise<boolean>;
+
+  // Experience sessions (erfaringsmøter — reflekterende samtaler som mater RAG-hjernen)
+  getExperienceSessions(userId: string): Promise<ExperienceSession[]>;
+  getExperienceSession(userId: string, id: number): Promise<ExperienceSession | undefined>;
+  createExperienceSession(userId: string, data: Omit<InsertExperienceSession, "userId">): Promise<ExperienceSession>;
+  updateExperienceSession(userId: string, id: number, updates: Record<string, unknown>): Promise<ExperienceSession | undefined>;
+  deleteExperienceSession(userId: string, id: number): Promise<boolean>;
+
+  // Lessons learned (strukturerte lærdommer fra erfaringsmøter)
+  getLessons(userId: string): Promise<LessonLearned[]>;
+  getLessonsForSession(userId: string, sessionId: number): Promise<LessonLearned[]>;
+  createLesson(userId: string, data: Omit<InsertLessonLearned, "userId">): Promise<LessonLearned>;
+  updateLesson(userId: string, id: number, updates: Record<string, unknown>): Promise<LessonLearned | undefined>;
+  deleteLesson(userId: string, id: number): Promise<boolean>;
 
   // Community learning (cross-user, anonymized)
   getCommunitySignals(filter?: { status?: string; signalType?: string }): Promise<CommunitySignal[]>;
@@ -491,6 +505,78 @@ export class DatabaseStorage implements IStorage {
         communityContributions: 1,
       } as any);
     }
+  }
+
+  // ============= Experience sessions =============
+
+  async getExperienceSessions(userId: string): Promise<ExperienceSession[]> {
+    return await db.select().from(experienceSessions)
+      .where(eq(experienceSessions.userId, userId))
+      .orderBy(desc(experienceSessions.startedAt));
+  }
+
+  async getExperienceSession(userId: string, id: number): Promise<ExperienceSession | undefined> {
+    const [row] = await db.select().from(experienceSessions)
+      .where(and(eq(experienceSessions.id, id), eq(experienceSessions.userId, userId)));
+    return row || undefined;
+  }
+
+  async createExperienceSession(userId: string, data: Omit<InsertExperienceSession, "userId">): Promise<ExperienceSession> {
+    const [row] = await db.insert(experienceSessions)
+      .values({ ...data, userId } as any)
+      .returning();
+    return row;
+  }
+
+  async updateExperienceSession(userId: string, id: number, updates: Record<string, unknown>): Promise<ExperienceSession | undefined> {
+    const [row] = await db.update(experienceSessions)
+      .set(updates as any)
+      .where(and(eq(experienceSessions.id, id), eq(experienceSessions.userId, userId)))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteExperienceSession(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(experienceSessions)
+      .where(and(eq(experienceSessions.id, id), eq(experienceSessions.userId, userId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  // ============= Lessons learned =============
+
+  async getLessons(userId: string): Promise<LessonLearned[]> {
+    return await db.select().from(lessonsLearned)
+      .where(eq(lessonsLearned.userId, userId))
+      .orderBy(desc(lessonsLearned.createdAt));
+  }
+
+  async getLessonsForSession(userId: string, sessionId: number): Promise<LessonLearned[]> {
+    return await db.select().from(lessonsLearned)
+      .where(and(eq(lessonsLearned.userId, userId), eq(lessonsLearned.sessionId, sessionId)))
+      .orderBy(desc(lessonsLearned.createdAt));
+  }
+
+  async createLesson(userId: string, data: Omit<InsertLessonLearned, "userId">): Promise<LessonLearned> {
+    const [row] = await db.insert(lessonsLearned)
+      .values({ ...data, userId } as any)
+      .returning();
+    return row;
+  }
+
+  async updateLesson(userId: string, id: number, updates: Record<string, unknown>): Promise<LessonLearned | undefined> {
+    const [row] = await db.update(lessonsLearned)
+      .set(updates as any)
+      .where(and(eq(lessonsLearned.id, id), eq(lessonsLearned.userId, userId)))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteLesson(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(lessonsLearned)
+      .where(and(eq(lessonsLearned.id, id), eq(lessonsLearned.userId, userId)))
+      .returning();
+    return result.length > 0;
   }
 }
 
