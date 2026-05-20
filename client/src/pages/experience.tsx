@@ -80,42 +80,67 @@ function ExperienceList() {
 
   const sessions = data?.sessions ?? [];
 
+  const isAudioFile = (file: File): boolean => {
+    if (file.type.startsWith("audio/") || file.type.startsWith("video/")) return true;
+    return /\.(mp3|wav|m4a|aac|ogg|flac|webm|mp4|mpeg)$/i.test(file.name);
+  };
+
   const handleUpload = async (file: File) => {
     setUploading(true);
     try {
-      // 1. Opprett en tom session
+      // 1. Opprett en tom sesjon
       const created = await apiRequest("POST", "/api/experience/sessions", {
         title: file.name.replace(/\.[^.]+$/, ""),
         seriesId: selectedSeriesId,
       });
       const newSession: ExperienceSession = (await created.json()).session;
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const authHeader = { Authorization: `Bearer ${authSession?.access_token ?? ""}` };
 
-      // 2. Last opp lyd og transkriber via eksisterende /api/transcribe-file
-      const formData = new FormData();
-      formData.append("audio", file);
-      const { data: { session } } = await supabase.auth.getSession();
-      const transcribeResp = await fetch("/api/transcribe-file", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
-        body: formData,
-      });
-      if (!transcribeResp.ok) {
-        throw new Error(`Transkripsjon feilet: ${transcribeResp.statusText}`);
+      if (isAudioFile(file)) {
+        // 2a. Lyd: transkriber via /api/transcribe-file og lagre segmentene
+        const formData = new FormData();
+        formData.append("audio", file);
+        const transcribeResp = await fetch("/api/transcribe-file", {
+          method: "POST",
+          headers: authHeader,
+          body: formData,
+        });
+        if (!transcribeResp.ok) {
+          throw new Error(`Transkripsjon feilet: ${transcribeResp.statusText}`);
+        }
+        const transcribed = await transcribeResp.json();
+        const rawSegments: TranscriptSegment[] = transcribed.segments ?? [];
+        const segments = rawSegments.map((s) => ({
+          ...s,
+          text: applyWordCorrections(s.text, wordCorrections),
+        }));
+        await apiRequest("PATCH", `/api/experience/sessions/${newSession.id}`, {
+          transcript: segments,
+          endedAt: new Date().toISOString(),
+        });
+        toast({
+          title: "Erfaringsmøte opprettet",
+          description: `${segments.length} segmenter transkribert fra ${file.name}`,
+        });
+      } else {
+        // 2b. Dokument: legg ved sesjonen og embed til hjernen
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploadResp = await fetch(
+          `/api/experience/sessions/${newSession.id}/attachments`,
+          { method: "POST", headers: authHeader, body: formData },
+        );
+        if (!uploadResp.ok) {
+          const err = await uploadResp.json().catch(() => ({}));
+          throw new Error(err.error || "Opplasting feilet");
+        }
+        toast({
+          title: "Dokument lagt til som vedlegg",
+          description: `${file.name} — ekstrahert tekst er klar som kontekst for AI`,
+        });
       }
-      const transcribed = await transcribeResp.json();
-      const rawSegments: TranscriptSegment[] = transcribed.segments ?? [];
-      const segments = rawSegments.map((s) => ({
-        ...s,
-        text: applyWordCorrections(s.text, wordCorrections),
-      }));
 
-      // 3. Lagre transkriptet på sessionen
-      await apiRequest("PATCH", `/api/experience/sessions/${newSession.id}`, {
-        transcript: segments,
-        endedAt: new Date().toISOString(),
-      });
-
-      toast({ title: "Erfaringsmøte opprettet", description: `${segments.length} segmenter transkribert` });
       queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
       navigate(`/erfaring/${newSession.id}`);
     } catch (err: any) {
@@ -161,14 +186,14 @@ function ExperienceList() {
                 <Upload className="h-5 w-5" />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-base mb-1">Last opp lydfil</h3>
+                <h3 className="font-semibold text-base mb-1">Last opp filer</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Har du tatt opp møtet på telefon eller annen enhet? Last opp lydfilen (mp3, wav, m4a) så transkriberes den automatisk.
+                  Lyd (mp3/wav/m4a) transkriberes automatisk. Dokumenter (PDF/Word/Excel) blir vedlegg til sesjonen og brukes som kontekst når AI ekstraherer lærdommer.
                 </p>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="audio/*,video/mp4,video/mpeg"
+                  accept="audio/*,video/mp4,video/mpeg,.pdf,.docx,.xlsx,.xls,.txt,image/*"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -216,7 +241,7 @@ function ExperienceList() {
         <Link href="/hjernen">
           <a className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
             <Brain className="h-4 w-4" />
-            Skal du laste opp dokumenter (PDF, Word, Excel) som AI skal lære av? Gå til Hjernen
+            Vil du legge til kunnskap som ikke er knyttet til et bestemt møte? Gå til Hjernen
             <ArrowRight className="h-3.5 w-3.5" />
           </a>
         </Link>
