@@ -20,6 +20,8 @@ import { AppShell } from "@/components/ds";
 const HistoryPage = lazy(() => import("@/pages/history"));
 const KnowledgePage = lazy(() => import("@/pages/knowledge"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
+const ExperiencePage = lazy(() => import("@/pages/experience"));
+const BrainPage = lazy(() => import("@/pages/brain"));
 
 function PageLoader() {
   return (
@@ -85,6 +87,9 @@ function AuthenticatedRouter() {
             <Route path="/historikk" component={HistoryPage} />
             <Route path="/kunnskapsbase" component={KnowledgePage} />
             <Route path="/innstillinger" component={SettingsPage} />
+            <Route path="/erfaring" component={ExperiencePage} />
+            <Route path="/erfaring/:id" component={ExperiencePage} />
+            <Route path="/hjernen" component={BrainPage} />
             {/* Recording routes are handled by always-mounted pages above. */}
             <Route path="/mote">{null}</Route>
             <Route path="/m/:id">{null}</Route>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, Home, Mic, History, BookOpen, Settings, LogOut, Sparkles, Gauge } from "lucide-react";
+import { Menu, Home, Mic, History, BookOpen, Settings, LogOut, Sparkles, Gauge, Lightbulb, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
@@ -9,7 +9,9 @@ import { supabase } from "@/lib/supabase";
 const NAV = [
   { href: "/", label: "Hjem", icon: Home },
   { href: "/mote", label: "Møte", icon: Mic },
+  { href: "/erfaring", label: "Erfaringsmøter", icon: Lightbulb },
   { href: "/intervju", label: "Intervjutrening", icon: Gauge },
+  { href: "/hjernen", label: "Hjernen", icon: Brain },
   { href: "/historikk", label: "Historikk", icon: History },
   { href: "/kunnskapsbase", label: "Kunnskapsbase", icon: BookOpen },
   { href: "/innstillinger", label: "Innstillinger", icon: Settings },
