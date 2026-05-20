@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot } from "lucide-react";
+import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { usePcmRecorder } from "@/hooks/usePcmRecorder";
+import { useScreenCapture } from "@/hooks/use-screen-capture";
 import { applyWordCorrections } from "@/lib/word-corrections";
+import { isLikelyVisualReference } from "@/lib/visual-reference";
 import type {
   ExperienceSession,
   TranscriptSegment,
@@ -430,10 +432,98 @@ function ExperienceSessionView({ id }: { id: number }) {
     },
   });
 
+  // Skjerm-fangst: brukeren kan dele skjerm under møtet og vi fanger frames
+  // når noen refererer til det visuelle. Bare beskrivelsen lagres som
+  // syntetisk transkript-segment — bildet kastes.
+  const screen = useScreenCapture();
+  const lastCaptureRef = useRef<number>(0);
+  const CAPTURE_COOLDOWN_MS = 20_000;
+  const [showSharePrompt, setShowSharePrompt] = useState(false);
+  const sharePromptDismissedRef = useRef(false);
+  const [isCapturingShot, setIsCapturingShot] = useState(false);
+
+  const persistTranscript = useCallback(
+    async (segments: TranscriptSegment[]) => {
+      liveTranscriptRef.current = segments;
+      setLiveTranscript(segments);
+      try {
+        await apiRequest("PATCH", `/api/experience/sessions/${id}`, { transcript: segments });
+      } catch (err: any) {
+        console.error("Lagring av transkript feilet:", err);
+      }
+    },
+    [id],
+  );
+
+  // Fang nåværende skjermbilde, vision-tolk det, og legg inn som syntetisk
+  // "Skjerm"-segment. Bildet sendes til server kun for analyse — ingenting
+  // lagres. Brukes både av manuell knapp og auto-trigger.
+  const captureAndDescribe = useCallback(
+    async (reason: "manual" | "auto") => {
+      if (!screen.active) {
+        if (reason === "auto" && !sharePromptDismissedRef.current) {
+          setShowSharePrompt(true);
+        } else if (reason === "manual") {
+          toast({
+            title: "Ingen aktiv skjermdeling",
+            description: "Trykk \"Del skjerm\" først for å fange skjermbilder.",
+          });
+        }
+        return;
+      }
+      const now = Date.now();
+      if (reason === "auto" && now - lastCaptureRef.current < CAPTURE_COOLDOWN_MS) {
+        return; // throttled
+      }
+      lastCaptureRef.current = now;
+      setIsCapturingShot(true);
+      try {
+        const frame = await screen.capture();
+        if (!frame) {
+          if (reason === "manual") {
+            toast({ title: "Kunne ikke fange skjermbilde", variant: "destructive" });
+          }
+          return;
+        }
+        const recent = liveTranscriptRef.current
+          .slice(-10)
+          .map((s) => s.text)
+          .join(" ");
+        const resp = await apiRequest("POST", "/api/screenshots/analyze", {
+          imageData: frame.dataUrl,
+          mimeType: "image/jpeg",
+          recentTranscript: recent,
+        });
+        const { description }: { description: string } = await resp.json();
+        if (!description?.trim()) return;
+
+        // Bruk timestamp fra siste segment hvis vi har det, ellers nå
+        const last = liveTranscriptRef.current[liveTranscriptRef.current.length - 1];
+        const visualSegment: TranscriptSegment = {
+          id: `screen-${now}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: last?.timestamp || new Date().toISOString(),
+          speaker: "Skjerm",
+          text: description.trim(),
+        };
+        await persistTranscript([...liveTranscriptRef.current, visualSegment]);
+        if (reason === "manual") {
+          toast({ title: "Skjermbilde tolket", description: description.slice(0, 100) });
+        }
+      } catch (err: any) {
+        console.error("Skjerm-fangst feilet:", err);
+        if (reason === "manual") {
+          toast({ title: "Vision-feil", description: err.message, variant: "destructive" });
+        }
+      } finally {
+        setIsCapturingShot(false);
+      }
+    },
+    [persistTranscript, screen, toast],
+  );
+
   // Live-opptak: hver 28s mottar vi en WAV-chunk, sender den til
   // /api/transcribe, og appender returnerte segmenter til liveTranscript.
-  // PATCHer serveren etter hver vellykket chunk slik at intet går tapt
-  // hvis brukeren navigerer bort.
+  // Etter append: sjekk om noe i de nye segmentene refererer til visuelt.
   const handleChunk = useCallback(
     async (wavBlob: Blob) => {
       try {
@@ -449,33 +539,42 @@ function ExperienceSessionView({ id }: { id: number }) {
 
         const resp = await apiRequest("POST", "/api/transcribe", {
           audio: base64,
-          // Samme default som /mote — OpenAI Whisper håndterer flere snakkere
-          // i samme rom bedre enn nb-whisper-medium ved variabel mic-avstand.
           model: "openai",
           mimeType: "audio/wav",
         });
         const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
         if (!newSegments?.length) return;
 
-        // Anvend brukerens ord-rettelser før vi lagrer — identisk med /mote
         const corrected = newSegments.map((s) => ({
           ...s,
           text: applyWordCorrections(s.text, wordCorrections),
         }));
-        const updated = [...liveTranscriptRef.current, ...corrected];
-        liveTranscriptRef.current = updated;
-        setLiveTranscript(updated);
+        await persistTranscript([...liveTranscriptRef.current, ...corrected]);
 
-        // Persist løpende slik at intet går tapt hvis brukeren navigerer bort
-        await apiRequest("PATCH", `/api/experience/sessions/${id}`, {
-          transcript: updated,
-        });
+        // Visuell-referanse-deteksjon: nøkkelord-match først (gratis), AI-
+        // klassifierer som backup hvis ikke. Begge kan trigge captureAndDescribe.
+        const combinedText = corrected.map((s) => s.text).join(" ");
+        if (isLikelyVisualReference(combinedText)) {
+          void captureAndDescribe("auto");
+        } else if (combinedText.length > 20) {
+          // Fire-and-forget AI-klassifierer
+          (async () => {
+            try {
+              const checkResp = await apiRequest("POST", "/api/experience/visual-check", {
+                text: combinedText,
+              });
+              const { visual }: { visual: boolean } = await checkResp.json();
+              if (visual) void captureAndDescribe("auto");
+            } catch {
+              // klassifierer er best-effort
+            }
+          })();
+        }
       } catch (err: any) {
         console.error("Chunk-feil:", err);
-        // Ikke vis toast på hver feil — det er for støyende. Logg og fortsett.
       }
     },
-    [id],
+    [captureAndDescribe, persistTranscript, wordCorrections],
   );
 
   const recorder = usePcmRecorder({ onChunk: handleChunk });
@@ -618,6 +717,36 @@ function ExperienceSessionView({ id }: { id: number }) {
                   />
                 ))}
               </div>
+              {screen.active ? (
+                <Button
+                  onClick={() => captureAndDescribe("manual")}
+                  variant="outline"
+                  size="sm"
+                  disabled={isCapturingShot}
+                  aria-label="Ta skjermbilde"
+                  title="Ta skjermbilde"
+                >
+                  {isCapturingShot ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Camera className="h-4 w-4" />
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => {
+                    sharePromptDismissedRef.current = false;
+                    setShowSharePrompt(false);
+                    void screen.start();
+                  }}
+                  variant="outline"
+                  size="sm"
+                  aria-label="Del skjerm"
+                  title="Del skjerm for å fange visuell kontekst"
+                >
+                  <Monitor className="h-4 w-4" />
+                </Button>
+              )}
               <Button
                 onClick={handleStopRecording}
                 variant="destructive"
@@ -628,8 +757,43 @@ function ExperienceSessionView({ id }: { id: number }) {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-3">
-              Transkripsjon kommer inn hvert 28. sekund. Hold mikrofonen plassert sentralt rundt bordet.
+              {screen.active
+                ? "AI fanger skjermbilder automatisk når noen refererer til det visuelle. Bilder kastes etter analyse — kun beskrivelser lagres."
+                : "Transkripsjon kommer inn hvert 28. sekund. Trykk skjerm-ikonet for å dele skjerm hvis dere viser noe visuelt."}
             </p>
+
+            {showSharePrompt && !screen.active && (
+              <div className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+                <Monitor className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+                <div className="flex-1">
+                  <div className="font-medium">Det høres ut som noen viser noe</div>
+                  <div className="text-muted-foreground text-xs mt-0.5">
+                    Del skjerm slik at AI kan fange den visuelle konteksten og lage bedre lærdommer.
+                  </div>
+                </div>
+                <Button
+                  onClick={() => {
+                    setShowSharePrompt(false);
+                    void screen.start();
+                  }}
+                  size="sm"
+                >
+                  Del skjerm
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowSharePrompt(false);
+                    sharePromptDismissedRef.current = true;
+                  }}
+                  aria-label="Lukk"
+                  className="h-8 w-8"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </Panel>
         )}
 
@@ -653,9 +817,29 @@ function ExperienceSessionView({ id }: { id: number }) {
           </Panel>
         ) : transcriptText ? (
           <Panel>
-            <pre className="text-sm font-mono whitespace-pre-wrap text-muted-foreground max-h-96 overflow-y-auto p-4">
-              {transcriptText}
-            </pre>
+            <div className="text-sm max-h-96 overflow-y-auto p-4 space-y-2">
+              {displayedTranscript.map((seg, idx) => {
+                const isScreen = seg.speaker === "Skjerm";
+                return (
+                  <div
+                    key={seg.id ?? idx}
+                    className={
+                      isScreen
+                        ? "flex gap-2 p-2 rounded-md bg-primary/5 border border-primary/15 text-foreground"
+                        : "flex gap-2 text-muted-foreground"
+                    }
+                  >
+                    {isScreen && <Monitor className="h-4 w-4 mt-0.5 shrink-0 text-primary" />}
+                    <div className="min-w-0 flex-1">
+                      <span className={isScreen ? "font-medium text-primary text-xs uppercase tracking-wider" : "font-mono text-xs"}>
+                        {isScreen ? "Skjerm" : seg.speaker || "—"}
+                      </span>
+                      <span className="ml-2">{seg.text}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
             {!recorder.isRecording && (
               <div className="px-4 pb-3">
                 <Button

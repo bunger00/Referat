@@ -4,6 +4,8 @@ import { storage } from "../storage";
 import { logger } from "../lib/logger";
 import { extractLessons } from "../lib/lesson-extractor";
 import { ingestText } from "../lib/knowledge";
+import { trackedChatCompletion } from "../lib/ai-tracker";
+import { z } from "zod";
 
 const ALLOWED_UPDATE_FIELDS = [
   "title",
@@ -98,6 +100,46 @@ export function registerExperienceRoutes(app: Express) {
       res.json({ ok });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /api/experience/visual-check
+   *
+   * Lett AI-klassifierer som svarer ja/nei på om en transkript-chunk
+   * refererer til noe visuelt (skjerm, diagram, dokument vist). Brukes som
+   * backup når client-side nøkkelord-matching ikke fanger tilfellet.
+   *
+   * Bruker gpt-5-nano-equivalent — billigst tilgjengelig modell — siden
+   * dette kalles potensielt for hver 28s-chunk gjennom hele møtet.
+   */
+  app.post("/api/experience/visual-check", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const { text } = z.object({ text: z.string().min(1).max(2000) }).parse(req.body);
+      const resp = (await trackedChatCompletion(
+        { endpoint: "/api/experience/visual-check", userId },
+        {
+          model: "gpt-5",
+          messages: [
+            {
+              role: "system",
+              content:
+                "Du er en klassifierer. Svar KUN med JSON `{\"visual\": true}` eller `{\"visual\": false}`. true hvis teksten refererer til noe visuelt (skjerm, diagram, tegning, tabell, bilde, dokument vist) som lytteren ser akkurat nå. Eksempler på true: \"som dere ser her\", \"denne tegningen\", \"kolonne 3\", \"den røde streken\". Eksempler på false: småprat, generelle utsagn, fortid uten visuell referanse.",
+            },
+            { role: "user", content: text },
+          ],
+          response_format: { type: "json_object" },
+        },
+      )) as any;
+      const raw = resp.choices?.[0]?.message?.content ?? "{}";
+      let parsed = { visual: false };
+      try { parsed = JSON.parse(raw); } catch { /* keep default */ }
+      res.json({ visual: !!parsed.visual });
+    } catch (error: any) {
+      // Aldri throw fra denne — klienten skal fortsette opptaket uansett
+      logger.warn({ err: error.message }, "Visual-check failed");
+      res.json({ visual: false });
     }
   });
 
