@@ -3,7 +3,7 @@ import { requireAuth, getUserId } from "../auth";
 import { storage } from "../storage";
 import { ingestLesson } from "../lib/knowledge";
 import { logger } from "../lib/logger";
-import { lessonTypeSchema } from "@shared/schema";
+import { lessonTypeSchema, lessonStatusSchema } from "@shared/schema";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -13,6 +13,7 @@ const createSchema = z.object({
   solution: z.string().min(1),
   context: z.string().optional().nullable(),
   type: lessonTypeSchema,
+  status: lessonStatusSchema.optional().default("open"),
   tags: z.array(z.string()).optional().default([]),
   relatedScreenshotIds: z.array(z.number()).optional().default([]),
   relatedDocumentIds: z.array(z.number()).optional().default([]),
@@ -44,6 +45,7 @@ export function registerLessonsRoutes(app: Express) {
         solution: data.solution,
         context: data.context ?? null,
         type: data.type,
+        status: data.status,
         tags: data.tags,
         relatedScreenshotIds: data.relatedScreenshotIds,
         relatedDocumentIds: data.relatedDocumentIds,

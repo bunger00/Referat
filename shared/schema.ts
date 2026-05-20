@@ -639,10 +639,36 @@ export type AiUsageLogEntry = typeof aiUsageLog.$inferSelect;
  * strukturerte lærdommer (ikke aksjoner/beslutninger), og at hele
  * transkriptet + hver lærdom mates inn i RAG-hjernen for senere oppslag.
  */
+/**
+ * Erfaringsmøter kan grupperes i serier (prosjekter, fagområder osv.) slik
+ * at AI kan se lærdommer fra tidligere sesjoner i samme kontekst og foreslå
+ * oppfølging eller flagge gjentagende mønstre.
+ */
+export const experienceSeries = pgTable("experience_series", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("idx_experience_series_user").on(t.userId),
+}));
+
+export const insertExperienceSeriesSchema = createInsertSchema(experienceSeries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertExperienceSeries = z.infer<typeof insertExperienceSeriesSchema>;
+export type ExperienceSeries = typeof experienceSeries.$inferSelect;
+
 export const experienceSessions = pgTable("experience_sessions", {
   id: serial("id").primaryKey(),
   userId: uuid("user_id").notNull(),
   title: varchar("title", { length: 255 }),
+  // Valgfri kobling til en serie/prosjekt. NULL = frittstående sesjon.
+  seriesId: integer("series_id"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   endedAt: timestamp("ended_at"),
   elapsedSeconds: integer("elapsed_seconds").default(0),
@@ -653,7 +679,37 @@ export const experienceSessions = pgTable("experience_sessions", {
   lessonsExtractedAt: timestamp("lessons_extracted_at"),
 }, (t) => ({
   userIdx: index("idx_experience_sessions_user").on(t.userId),
+  seriesIdx: index("idx_experience_sessions_series").on(t.seriesId),
 }));
+
+/**
+ * Vedlegg knyttet til en erfaringsmøte-sesjon. Brukeren kan laste opp
+ * dokumenter (PDF/Word/Excel) som diskuteres under møtet. AI får
+ * ekstrahert tekst inn som kontekst ved lærdom-ekstraksjon, og dokumentene
+ * blir samtidig embeddet i hjernen.
+ */
+export const experienceAttachments = pgTable("experience_attachments", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  sessionId: integer("session_id").notNull(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  // Ekstrahert tekst fra dokumentet. Lagres inline slik at vi slipper
+  // re-parse ved hver ekstraksjon. Filen selv lagres ikke.
+  extractedText: text("extracted_text").notNull(),
+  bytes: integer("bytes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("idx_experience_attachments_user").on(t.userId),
+  sessionIdx: index("idx_experience_attachments_session").on(t.sessionId),
+}));
+
+export type ExperienceAttachment = typeof experienceAttachments.$inferSelect;
+export const insertExperienceAttachmentSchema = createInsertSchema(experienceAttachments).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertExperienceAttachment = z.infer<typeof insertExperienceAttachmentSchema>;
 
 export const insertExperienceSessionSchema = createInsertSchema(experienceSessions).omit({
   id: true,
@@ -680,6 +736,11 @@ export const lessonsLearned = pgTable("lessons_learned", {
   context: text("context"),
   type: varchar("type", { length: 16 }).notNull().default("short"),
   tags: text("tags").array().default([]),
+  // Oppfølgings-status: 'open' (default ved opprettelse), 'in_progress'
+  // (under utprøving), 'verified' (bekreftet å fungere), 'superseded' (ikke
+  // lenger aktuelt). AI bruker dette til å foreslå oppfølging i neste
+  // sesjon i samme serie.
+  status: varchar("status", { length: 24 }).notNull().default("open"),
   // IDer av screenshots og meeting_documents fra opphavsmøtet som ble vevet
   // inn som rik kontekst for denne lærdommen.
   relatedScreenshotIds: integer("related_screenshot_ids").array().default([]),
@@ -689,6 +750,9 @@ export const lessonsLearned = pgTable("lessons_learned", {
   userIdx: index("idx_lessons_learned_user").on(t.userId),
   sessionIdx: index("idx_lessons_learned_session").on(t.sessionId),
 }));
+
+export const lessonStatusSchema = z.enum(["open", "in_progress", "verified", "superseded"]);
+export type LessonStatus = z.infer<typeof lessonStatusSchema>;
 
 export const insertLessonLearnedSchema = createInsertSchema(lessonsLearned).omit({
   id: true,
@@ -754,6 +818,10 @@ export const proposedLessonSchema = z.object({
   tags: z.array(z.string()).default([]),
   relatedScreenshotIds: z.array(z.number()).default([]),
   relatedDocumentIds: z.array(z.number()).default([]),
+  // Hvis AI mener denne lærdommen oppdaterer en eksisterende lærdom fra
+  // samme prosjekt/serie, oppgis dens id her. Brukeren kan da bekrefte
+  // oppfølging eller avvise koblingen.
+  relatesToLessonId: z.number().nullable().optional(),
 });
 export type ProposedLesson = z.infer<typeof proposedLessonSchema>;
 
