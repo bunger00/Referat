@@ -144,4 +144,86 @@ Knowledge_chunks-tabellen blir bare stående tom — ingen data tapt.
 
 ## Review
 
-(Fylles ut etterhvert som arbeidet skjer)
+### Hva ble levert (MVP)
+
+**Fase 1 — Schema + RAG-grunnmur**
+- ✓ `shared/schema.ts`: 3 nye tabeller (`experience_sessions`,
+  `lessons_learned`, `knowledge_chunks` med pgvector(1536)).
+- ✓ `script/apply-extensions.ts`: idempotent oppsett av `vector`-extension
+  og HNSW-indeks med `vector_cosine_ops` på `knowledge_chunks.embedding`.
+  Hektet på `npm run db:push`.
+- ✓ `server/lib/embeddings.ts`: OpenAI text-embedding-3-small wrapper med
+  batch-støtte (100 inputs per request), word-basert chunker (~500 ord,
+  50 overlap), kostnads-tracking i `ai_usage_log`.
+- ✓ `server/lib/knowledge.ts`: lavnivå `ingestText` med idempotent
+  re-ingestion (sletter eksisterende chunks før insert), domene-wrappers
+  (`ingestLesson`, `ingestMeetingSummary`, `ingestMeetingTranscript`,
+  `ingestRule`), og `searchKnowledge` med Drizzle `cosineDistance`-helper.
+
+**Fase 2 — Backend-endepunkter**
+- ✓ `server/routes/experience.ts`: CRUD + `POST /:id/extract` som kjører
+  AI-ekstraksjon og samtidig ingester rå-transkriptet (best-effort) til
+  RAG-hjernen.
+- ✓ `server/routes/lessons.ts`: CRUD med auto-embedding ved insert/update
+  (best-effort, ikke-blokkerende).
+- ✓ `server/routes/brain.ts`: chat (RAG over knowledge_chunks),
+  upload (PDF/Word/bilde/tekst, vision-pipeline for bilder), backfill
+  (idempotent ingestion av eksisterende referater + lærdommer).
+- ✓ `server/lib/lesson-extractor.ts`: AI-prompt på norsk som returnerer
+  JSON-strukturert `ProposedLesson[]` med per-case granularitet.
+- ✓ `server/lib/brain-chat.ts`: RAG-prompt med eksplisitte [Kilde N]-
+  referanser og når-i-tvil-si-jeg-vet-ikke-instruks.
+- ✓ Storage utvidet med eksperience_sessions + lessons_learned CRUD.
+
+**Fase 3 — Frontend**
+- ✓ `/erfaring`: liste + start-nytt-flyt. Hver session har upload-audio,
+  manuell tekst-input, redigerbar tittel/transkript, inline-godkjenning
+  av AI-foreslåtte lærdommer.
+- ✓ `/hjernen`: chat-grensesnitt med kilder + eksempel-spørsmål +
+  upload-kort + backfill-knapp.
+- ✓ Sidebar og MobileNav fikk to nye lenker. Hjemmesiden fikk
+  "Erfaring og kunnskap"-seksjon.
+- ✓ Routing: `/erfaring`, `/erfaring/:id`, `/hjernen` (alle lazy-loadet).
+
+### Hva ble bevisst utelatt i MVP
+
+- **Live-opptak på `/erfaring`**: Krever refaktor av meeting.tsx
+  AudioContext-pipeline til en delt hook. CLAUDE.md advarer eksplisitt
+  mot å røre dette. MVP løses med filopplasting + manuelt input.
+  Follow-up: extract usePcmRecorder-hook i en separat PR.
+- **Excel-støtte i brain-upload**: Krever ny `xlsx`-dep. Droppet for å
+  unngå dep-økning før MVP. Følges opp ved behov.
+- **Streaming av chat-svar**: Ble fullført som enkelt-respons. Klar for
+  oppgradering med SSE i framtidig PR.
+- **Rules-backfill**: `extracted_rules` ingestes ikke automatisk ennå —
+  skipped med log-melding for synlighet. Følges opp.
+
+### Verifisering
+
+- ✓ `npm run check`: alle TS-feil borte.
+- ✓ `npm run build`: vellykket, 5 pre-eksisterende warnings i vite.config.ts.
+- ⚠ Manuell røyk-test (UI + ende-til-ende) ikke utført i dette miljøet
+  (har ikke DATABASE_URL/OPENAI_API_KEY i container). Anbefales kjørt
+  lokalt eller på Render staging før merge.
+
+### Tilbakerullingsplan
+
+Alle endringer er i nye filer eller minimalt rørt eksisterende.
+- 3 nye tabeller (pgvector-aktivert)
+- 3 nye route-grupper
+- 2 nye frontend-sider
+- 5 ny lib-filer
+- Eksisterende meeting.tsx, interview.tsx, auth-flyt, schema URØRT.
+
+En `git revert` på MVP-commitene ruller tilbake alt uten datatap.
+knowledge_chunks-tabellen blir stående tom hvis vi reverter — ingen
+eksisterende data går tapt.
+
+### Neste skritt (etter merge)
+
+1. RLS auto-aktiveres på de nye tabellene via `apply-rls.ts` (separat PR).
+2. Manuell røyk-test på Render staging.
+3. Live-opptak på `/erfaring` (extract usePcmRecorder-hook).
+4. Excel-støtte i brain-upload.
+5. Streaming chat-svar med SSE.
+6. Rules backfill-løype.
