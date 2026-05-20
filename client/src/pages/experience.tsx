@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2 } from "lucide-react";
+import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
+import { usePcmRecorder } from "@/hooks/usePcmRecorder";
 import type {
   ExperienceSession,
   TranscriptSegment,
   ProposedLesson,
   LessonLearned,
 } from "@shared/schema";
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("nb-NO", {
@@ -28,7 +35,14 @@ function formatDate(iso: string): string {
 
 export default function ExperiencePage() {
   const [, sessionMatch] = useRoute<{ id: string }>("/erfaring/:id");
-  return sessionMatch ? <ExperienceSessionView id={Number(sessionMatch.id)} /> : <ExperienceList />;
+  // key={id} sikrer at SessionView remountes når brukeren bytter mellom
+  // sesjoner — ellers ville recorder-hook'en holdt seg knyttet til forrige
+  // sesjon-id og skrive transkripsjon til feil session.
+  return sessionMatch ? (
+    <ExperienceSessionView key={sessionMatch.id} id={Number(sessionMatch.id)} />
+  ) : (
+    <ExperienceList />
+  );
 }
 
 function ExperienceList() {
@@ -93,16 +107,31 @@ function ExperienceList() {
       />
 
       <Section title="Start nytt">
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="p-6">
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="p-6 border-l-4 border-l-accent">
             <div className="flex items-start gap-4">
               <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/15 text-accent shrink-0">
+                <Mic className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-base mb-1">Ta opp live</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Sittegruppa er rundt bordet — start opptak og få sanntids-transkripsjon. AI ekstraherer lærdommer når dere er ferdig.
+                </p>
+                <StartLiveSessionButton />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
                 <Upload className="h-5 w-5" />
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-base mb-1">Last opp lydopptak</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Tar opp møtet på telefon eller datamaskin? Last opp filen så transkriberes den automatisk.
+                  Har du allerede et opptak fra telefon eller annen enhet? Last opp filen så transkriberes den automatisk.
                 </p>
                 <input
                   ref={fileInputRef}
@@ -138,7 +167,7 @@ function ExperienceList() {
 
           <Card className="p-6">
             <div className="flex items-start gap-4">
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-muted text-muted-foreground shrink-0">
                 <FileText className="h-5 w-5" />
               </div>
               <div className="flex-1">
@@ -225,6 +254,36 @@ function CreateBlankButton() {
   );
 }
 
+function StartLiveSessionButton() {
+  const [, navigate] = useLocation();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [creating, setCreating] = useState(false);
+
+  const handle = async () => {
+    setCreating(true);
+    try {
+      const resp = await apiRequest("POST", "/api/experience/sessions", {
+        title: `Erfaringsmøte ${new Date().toLocaleDateString("nb-NO")}`,
+      });
+      const session: ExperienceSession = (await resp.json()).session;
+      queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
+      navigate(`/erfaring/${session.id}?autostart=1`);
+    } catch (err: any) {
+      toast({ title: "Kunne ikke starte", description: err.message, variant: "destructive" });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Button onClick={handle} disabled={creating} className="w-full sm:w-auto">
+      {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
+      Start opptak nå
+    </Button>
+  );
+}
+
 function ExperienceSessionView({ id }: { id: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -239,11 +298,31 @@ function ExperienceSessionView({ id }: { id: number }) {
   const [proposals, setProposals] = useState<ProposedLesson[]>([]);
   const [extracting, setExtracting] = useState(false);
 
+  // Live-transkriptet under opptak. Holdes lokalt så det ikke overskrives av
+  // query-refetch midt i et opptak. Initialiseres fra serveren første gang
+  // session lastes, deretter eier opptaks-løypa det.
+  const [liveTranscript, setLiveTranscript] = useState<TranscriptSegment[] | null>(null);
+  // Holder fast hva som er "in flight" mot serveren slik at vi kan unngå
+  // tap hvis raske chunks overlapper.
+  const liveTranscriptRef = useRef<TranscriptSegment[]>([]);
+
   const session = data?.session;
   const lessons = data?.lessons ?? [];
 
-  const transcriptText =
-    session?.transcript?.map((s) => `[${s.timestamp}] ${s.speaker}: ${s.text}`).join("\n") ?? "";
+  // Sync første gang vi har data — etter det er liveTranscript autoritativt.
+  if (liveTranscript === null && session?.transcript) {
+    setLiveTranscript(session.transcript);
+    liveTranscriptRef.current = session.transcript;
+  } else if (liveTranscript === null && session) {
+    // Session har tom transcript
+    setLiveTranscript([]);
+    liveTranscriptRef.current = [];
+  }
+
+  const displayedTranscript = liveTranscript ?? session?.transcript ?? [];
+  const transcriptText = displayedTranscript
+    .map((s) => `[${s.timestamp}] ${s.speaker}: ${s.text}`)
+    .join("\n");
 
   const saveTitle = useMutation({
     mutationFn: async (title: string) => {
@@ -331,6 +410,76 @@ function ExperienceSessionView({ id }: { id: number }) {
     },
   });
 
+  // Live-opptak: hver 28s mottar vi en WAV-chunk, sender den til
+  // /api/transcribe, og appender returnerte segmenter til liveTranscript.
+  // PATCHer serveren etter hver vellykket chunk slik at intet går tapt
+  // hvis brukeren navigerer bort.
+  const handleChunk = useCallback(
+    async (wavBlob: Blob) => {
+      try {
+        const reader = new FileReader();
+        const base64: string = await new Promise((resolve, reject) => {
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split(",")[1] ?? "");
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(wavBlob);
+        });
+
+        const resp = await apiRequest("POST", "/api/transcribe", {
+          audio: base64,
+          model: "medium",
+          mimeType: "audio/wav",
+        });
+        const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
+        if (!newSegments?.length) return;
+
+        const updated = [...liveTranscriptRef.current, ...newSegments];
+        liveTranscriptRef.current = updated;
+        setLiveTranscript(updated);
+
+        // Persist løpende slik at intet går tapt hvis brukeren navigerer bort
+        await apiRequest("PATCH", `/api/experience/sessions/${id}`, {
+          transcript: updated,
+        });
+      } catch (err: any) {
+        console.error("Chunk-feil:", err);
+        // Ikke vis toast på hver feil — det er for støyende. Logg og fortsett.
+      }
+    },
+    [id],
+  );
+
+  const recorder = usePcmRecorder({ onChunk: handleChunk });
+
+  // Autostart fra ?autostart=1 (etter "Start opptak nå" på lista)
+  const autostartedRef = useRef(false);
+  if (!autostartedRef.current && typeof window !== "undefined" && session) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autostart") === "1" && !recorder.isRecording && !recorder.isStarting) {
+      autostartedRef.current = true;
+      // Fjern query-paramen så vi ikke restarter ved refresh
+      window.history.replaceState(null, "", window.location.pathname);
+      void recorder.start();
+    }
+  }
+
+  const handleStopRecording = async () => {
+    await recorder.stop();
+    // Markér møtet som fullført. lessonsExtractedAt settes senere ved ekstraksjon.
+    try {
+      await apiRequest("PATCH", `/api/experience/sessions/${id}`, {
+        endedAt: new Date().toISOString(),
+        elapsedSeconds: recorder.elapsedSeconds,
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${id}`] });
+    } catch (err: any) {
+      console.error("Lagring av møteslutt feilet:", err);
+    }
+    toast({ title: "Opptak stoppet", description: "Klar for å ekstrahere lærdommer." });
+  };
+
   if (isLoading) {
     return (
       <Page>
@@ -399,7 +548,64 @@ function ExperienceSessionView({ id }: { id: number }) {
         </Button>
       </div>
 
-      <Section title="Transkript">
+      <Section
+        title="Transkript"
+        actions={
+          !recorder.isRecording && !recorder.isStarting ? (
+            <Button onClick={() => recorder.start()} size="sm">
+              <Mic className="h-4 w-4 mr-2" />
+              {transcriptText ? "Fortsett opptak" : "Start opptak"}
+            </Button>
+          ) : null
+        }
+      >
+        {recorder.error && (
+          <Card className="p-3 mb-3 border-destructive bg-destructive/5 text-sm text-destructive">
+            {recorder.error}
+            <Button variant="ghost" size="sm" onClick={recorder.clearError} className="ml-2 h-6 px-2">
+              OK
+            </Button>
+          </Card>
+        )}
+
+        {(recorder.isRecording || recorder.isStarting) && (
+          <Panel className="p-4 mb-3 bg-accent/5 border-accent/20">
+            <div className="flex items-center gap-4">
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-destructive text-destructive-foreground animate-pulse">
+                <CircleDot className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">
+                  {recorder.isStarting ? "Starter…" : "Tar opp"}
+                </div>
+                <div className="text-2xl font-mono tabular-nums">
+                  {formatElapsed(recorder.elapsedSeconds)}
+                </div>
+              </div>
+              <div className="hidden sm:flex items-center gap-0.5 h-10">
+                {recorder.audioLevelBars.map((level, idx) => (
+                  <div
+                    key={idx}
+                    className="w-1 bg-accent rounded-full transition-all"
+                    style={{ height: `${Math.max(4, level * 40)}px` }}
+                  />
+                ))}
+              </div>
+              <Button
+                onClick={handleStopRecording}
+                variant="destructive"
+                disabled={recorder.isStarting}
+              >
+                <Square className="h-4 w-4 mr-2" />
+                Stopp opptak
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Transkripsjon kommer inn hvert 28. sekund. Hold mikrofonen plassert sentralt rundt bordet.
+            </p>
+          </Panel>
+        )}
+
         {transcriptEdit !== null ? (
           <Panel>
             <Textarea
@@ -420,33 +626,36 @@ function ExperienceSessionView({ id }: { id: number }) {
           </Panel>
         ) : transcriptText ? (
           <Panel>
-            <pre className="text-sm font-mono whitespace-pre-wrap text-muted-foreground max-h-96 overflow-y-auto">
+            <pre className="text-sm font-mono whitespace-pre-wrap text-muted-foreground max-h-96 overflow-y-auto p-4">
               {transcriptText}
             </pre>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTranscriptEdit(transcriptText)}
-              className="mt-3"
-            >
-              Redigér transkript
-            </Button>
+            {!recorder.isRecording && (
+              <div className="px-4 pb-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setTranscriptEdit(transcriptText)}
+                >
+                  Redigér transkript
+                </Button>
+              </div>
+            )}
           </Panel>
-        ) : (
+        ) : !recorder.isRecording && !recorder.isStarting ? (
           <EmptyState
             icon={FileText}
             title="Ingen transkript ennå"
-            description="Last opp et lydopptak eller lim inn teksten manuelt."
+            description="Trykk «Start opptak» over, last opp et lydopptak fra lista, eller lim inn teksten manuelt."
             actions={
               <Button onClick={() => setTranscriptEdit("")} variant="outline">
                 Lim inn transkript manuelt
               </Button>
             }
           />
-        )}
+        ) : null}
       </Section>
 
-      {transcriptText && (
+      {transcriptText && !recorder.isRecording && !recorder.isStarting && (
         <Section title="Lærdommer">
           {lessons.length > 0 && (
             <div className="mb-4 space-y-2">
