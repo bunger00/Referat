@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, varchar, integer, jsonb, boolean, uuid, index, vector } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 export const transcriptSegmentSchema = z.object({
@@ -630,3 +630,147 @@ export const aiUsageLog = pgTable("ai_usage_log", {
 }));
 
 export type AiUsageLogEntry = typeof aiUsageLog.$inferSelect;
+
+// ============= Erfaringsmøter + RAG-hjerne =============
+
+/**
+ * Erfaringsmøter er reflekterende samtaler der vi deler lærdommer og
+ * forbedringer. Skiller seg fra `meeting_sessions` ved at output-en er
+ * strukturerte lærdommer (ikke aksjoner/beslutninger), og at hele
+ * transkriptet + hver lærdom mates inn i RAG-hjernen for senere oppslag.
+ */
+export const experienceSessions = pgTable("experience_sessions", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  title: varchar("title", { length: 255 }),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  endedAt: timestamp("ended_at"),
+  elapsedSeconds: integer("elapsed_seconds").default(0),
+  transcript: jsonb("transcript").$type<TranscriptSegment[]>().default([]),
+  speakerMappings: jsonb("speaker_mappings").$type<Record<string, string>>().default({}),
+  userNotes: text("user_notes"),
+  // Når AI ekstraherte lærdommer. NULL = ikke ekstrahert ennå.
+  lessonsExtractedAt: timestamp("lessons_extracted_at"),
+}, (t) => ({
+  userIdx: index("idx_experience_sessions_user").on(t.userId),
+}));
+
+export const insertExperienceSessionSchema = createInsertSchema(experienceSessions).omit({
+  id: true,
+  startedAt: true,
+});
+export type InsertExperienceSession = z.infer<typeof insertExperienceSessionSchema>;
+export type ExperienceSession = typeof experienceSessions.$inferSelect;
+
+export const lessonTypeSchema = z.enum(["short", "thematic"]);
+export type LessonType = z.infer<typeof lessonTypeSchema>;
+
+/**
+ * En lærdom er en strukturert observasjon ekstrahert fra et erfaringsmøte
+ * (eller manuelt opprettet senere). AI velger granularitet per case —
+ * `short` = 1-3 setninger, `thematic` = lengre tematisk blokk.
+ */
+export const lessonsLearned = pgTable("lessons_learned", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  sessionId: integer("session_id"), // fk experience_sessions, nullable
+  title: varchar("title", { length: 255 }).notNull(),
+  problem: text("problem").notNull(),
+  solution: text("solution").notNull(),
+  context: text("context"),
+  type: varchar("type", { length: 16 }).notNull().default("short"),
+  tags: text("tags").array().default([]),
+  // IDer av screenshots og meeting_documents fra opphavsmøtet som ble vevet
+  // inn som rik kontekst for denne lærdommen.
+  relatedScreenshotIds: integer("related_screenshot_ids").array().default([]),
+  relatedDocumentIds: integer("related_document_ids").array().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("idx_lessons_learned_user").on(t.userId),
+  sessionIdx: index("idx_lessons_learned_session").on(t.sessionId),
+}));
+
+export const insertLessonLearnedSchema = createInsertSchema(lessonsLearned).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertLessonLearned = z.infer<typeof insertLessonLearnedSchema>;
+export type LessonLearned = typeof lessonsLearned.$inferSelect;
+
+export const knowledgeSourceTypeSchema = z.enum([
+  "lesson",
+  "meeting_summary",
+  "meeting_transcript",
+  "experience_transcript",
+  "rule",
+  "uploaded_doc",
+  "uploaded_image",
+]);
+export type KnowledgeSourceType = z.infer<typeof knowledgeSourceTypeSchema>;
+
+/**
+ * RAG-hjernens minne: hver rad er en embeddet "chunk" tekst som er hentet
+ * fra én av kildetypene over. Brukeren kan stille spørsmål på `/hjernen`,
+ * vi gjør cosine similarity-søk i denne tabellen (HNSW-indeks for fart),
+ * og mater top-K chunks som kontekst til gpt-5.
+ *
+ * Embedding-dimensjon 1536 = OpenAI `text-embedding-3-small`.
+ */
+export const knowledgeChunks = pgTable("knowledge_chunks", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull(),
+  sourceType: varchar("source_type", { length: 32 }).notNull(),
+  // ID i opphavstabellen. Nullable for ad-hoc opplastede dokumenter som
+  // ikke har en egen rad noe annet sted.
+  sourceId: integer("source_id"),
+  sourceName: varchar("source_name", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 1536 }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("idx_knowledge_chunks_user").on(t.userId),
+  sourceIdx: index("idx_knowledge_chunks_source").on(t.sourceType, t.sourceId),
+  // HNSW-indeksen lages via script/apply-extensions.ts (Drizzle støtter ikke
+  // pgvector-operator-classes på indeks ennå). Lar default B-tree være.
+}));
+
+export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
+export const insertKnowledgeChunkSchema = createInsertSchema(knowledgeChunks).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertKnowledgeChunk = z.infer<typeof insertKnowledgeChunkSchema>;
+
+// ============= Frontend-typer for lærdom-forslag (før godkjenning) =============
+
+export const proposedLessonSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  problem: z.string(),
+  solution: z.string(),
+  context: z.string().optional(),
+  type: lessonTypeSchema,
+  tags: z.array(z.string()).default([]),
+  relatedScreenshotIds: z.array(z.number()).default([]),
+  relatedDocumentIds: z.array(z.number()).default([]),
+});
+export type ProposedLesson = z.infer<typeof proposedLessonSchema>;
+
+// ============= Chat mot RAG-hjernen =============
+
+export const chatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+export const knowledgeSourceRefSchema = z.object({
+  chunkId: z.number(),
+  sourceType: knowledgeSourceTypeSchema,
+  sourceId: z.number().nullable(),
+  sourceName: z.string(),
+  excerpt: z.string(),
+  score: z.number(),
+});
+export type KnowledgeSourceRef = z.infer<typeof knowledgeSourceRefSchema>;
