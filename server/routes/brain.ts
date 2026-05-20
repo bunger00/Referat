@@ -39,6 +39,35 @@ async function parseDocxBuffer(buf: Buffer): Promise<string> {
   return result.value || "";
 }
 
+/**
+ * Parser et Excel-regneark til ren tekst. Hver ark blir et avsnitt med
+ * tab-separerte rader slik at AI-en kan lese tabellen som strukturert
+ * tekst og citer celler ved behov. Vi inkluderer ark-navnet som overskrift
+ * for kontekst.
+ */
+async function parseXlsxBuffer(buf: Buffer): Promise<string> {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as unknown as ArrayBuffer);
+  const sheets: string[] = [];
+  for (const sheet of wb.worksheets) {
+    const rows: string[] = [];
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      const cells: string[] = [];
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const v = cell.value;
+        if (v === null || v === undefined) return;
+        if (typeof v === "object" && "text" in v) cells.push(String((v as any).text));
+        else if (typeof v === "object" && "result" in v) cells.push(String((v as any).result));
+        else cells.push(String(v));
+      });
+      if (cells.length) rows.push(cells.join("\t"));
+    });
+    if (rows.length) sheets.push(`## Ark: ${sheet.name}\n${rows.join("\n")}`);
+  }
+  return sheets.join("\n\n");
+}
+
 async function describeImageWithVision(buf: Buffer, mimeType: string): Promise<string> {
   const base64 = buf.toString("base64");
   const resp = await openai.chat.completions.create({
@@ -105,6 +134,13 @@ export function registerBrainRoutes(app: Express) {
         originalname.toLowerCase().endsWith(".docx")
       ) {
         text = await parseDocxBuffer(buffer);
+      } else if (
+        mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        mimetype === "application/vnd.ms-excel" ||
+        originalname.toLowerCase().endsWith(".xlsx") ||
+        originalname.toLowerCase().endsWith(".xls")
+      ) {
+        text = await parseXlsxBuffer(buffer);
       } else if (mimetype.startsWith("image/")) {
         text = await describeImageWithVision(buffer, mimetype);
         sourceType = "uploaded_image";
@@ -112,7 +148,7 @@ export function registerBrainRoutes(app: Express) {
         text = buffer.toString("utf-8");
       } else {
         return res.status(400).json({
-          error: `Filtype ikke støttet (${mimetype}). Støttede typer: PDF, Word (.docx), bilde, tekst.`,
+          error: `Filtype ikke støttet (${mimetype}). Støttede typer: PDF, Word (.docx), Excel (.xlsx), bilde, tekst.`,
         });
       }
 

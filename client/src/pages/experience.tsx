@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X } from "lucide-react";
+import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -144,9 +144,9 @@ function ExperienceList() {
                 <Upload className="h-5 w-5" />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-base mb-1">Last opp lydopptak</h3>
+                <h3 className="font-semibold text-base mb-1">Last opp lydfil</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Har du allerede et opptak fra telefon eller annen enhet? Last opp filen så transkriberes den automatisk.
+                  Har du tatt opp møtet på telefon eller annen enhet? Last opp lydfilen (mp3, wav, m4a) så transkriberes den automatisk.
                 </p>
                 <input
                   ref={fileInputRef}
@@ -195,6 +195,14 @@ function ExperienceList() {
             </div>
           </Card>
         </div>
+
+        <Link href="/hjernen">
+          <a className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
+            <Brain className="h-4 w-4" />
+            Skal du laste opp dokumenter (PDF, Word, Excel) som AI skal lære av? Gå til Hjernen
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </Link>
       </Section>
 
       <Section title="Tidligere erfaringsmøter">
