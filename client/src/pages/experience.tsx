@@ -1,13 +1,16 @@
 import { useState, useRef, useCallback } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain } from "lucide-react";
+import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain, FolderPlus, Paperclip, History, CheckCircle2, Clock } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
@@ -17,6 +20,8 @@ import { applyWordCorrections } from "@/lib/word-corrections";
 import { isLikelyVisualReference } from "@/lib/visual-reference";
 import type {
   ExperienceSession,
+  ExperienceSeries,
+  ExperienceAttachment,
   TranscriptSegment,
   ProposedLesson,
   LessonLearned,
@@ -67,6 +72,12 @@ function ExperienceList() {
   });
   const wordCorrections = corrData?.corrections ?? [];
 
+  const { data: seriesData } = useQuery<{ series: ExperienceSeries[] }>({
+    queryKey: ["/api/experience/series"],
+  });
+  const series = seriesData?.series ?? [];
+  const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
+
   const sessions = data?.sessions ?? [];
 
   const handleUpload = async (file: File) => {
@@ -75,6 +86,7 @@ function ExperienceList() {
       // 1. Opprett en tom session
       const created = await apiRequest("POST", "/api/experience/sessions", {
         title: file.name.replace(/\.[^.]+$/, ""),
+        seriesId: selectedSeriesId,
       });
       const newSession: ExperienceSession = (await created.json()).session;
 
@@ -122,6 +134,11 @@ function ExperienceList() {
       />
 
       <Section title="Start nytt">
+        <SeriesPicker
+          series={series}
+          selectedId={selectedSeriesId}
+          onChange={setSelectedSeriesId}
+        />
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="p-6 border-l-4 border-l-accent">
             <div className="flex items-start gap-4">
@@ -133,7 +150,7 @@ function ExperienceList() {
                 <p className="text-sm text-muted-foreground mb-4">
                   Sittegruppa er rundt bordet — start opptak og få sanntids-transkripsjon. AI ekstraherer lærdommer når dere er ferdig.
                 </p>
-                <StartLiveSessionButton />
+                <StartLiveSessionButton seriesId={selectedSeriesId} />
               </div>
             </div>
           </Card>
@@ -190,7 +207,7 @@ function ExperienceList() {
                 <p className="text-sm text-muted-foreground mb-4">
                   Har du allerede et notat eller transkript? Opprett en tom sesjon og lim inn teksten.
                 </p>
-                <CreateBlankButton />
+                <CreateBlankButton seriesId={selectedSeriesId} />
               </div>
             </div>
           </Card>
@@ -249,7 +266,7 @@ function ExperienceList() {
   );
 }
 
-function CreateBlankButton() {
+function CreateBlankButton({ seriesId }: { seriesId: number | null }) {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -258,7 +275,7 @@ function CreateBlankButton() {
   const handle = async () => {
     setCreating(true);
     try {
-      const resp = await apiRequest("POST", "/api/experience/sessions", { title: "" });
+      const resp = await apiRequest("POST", "/api/experience/sessions", { title: "", seriesId });
       const session: ExperienceSession = (await resp.json()).session;
       queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
       navigate(`/erfaring/${session.id}`);
@@ -277,7 +294,7 @@ function CreateBlankButton() {
   );
 }
 
-function StartLiveSessionButton() {
+function StartLiveSessionButton({ seriesId }: { seriesId: number | null }) {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -288,6 +305,7 @@ function StartLiveSessionButton() {
     try {
       const resp = await apiRequest("POST", "/api/experience/sessions", {
         title: `Erfaringsmøte ${new Date().toLocaleDateString("nb-NO")}`,
+        seriesId,
       });
       const session: ExperienceSession = (await resp.json()).session;
       queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
@@ -307,12 +325,116 @@ function StartLiveSessionButton() {
   );
 }
 
+function SeriesPicker({
+  series,
+  selectedId,
+  onChange,
+}: {
+  series: ExperienceSeries[];
+  selectedId: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      const resp = await apiRequest("POST", "/api/experience/series", {
+        name: name.trim(),
+        description: description.trim() || null,
+      });
+      const newSeries: ExperienceSeries = (await resp.json()).series;
+      queryClient.invalidateQueries({ queryKey: ["/api/experience/series"] });
+      onChange(newSeries.id);
+      setName("");
+      setDescription("");
+      setCreating(false);
+      toast({ title: "Serie opprettet" });
+    } catch (err: any) {
+      toast({ title: "Kunne ikke opprette serie", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <span className="text-sm text-muted-foreground">Knytt til prosjekt/serie:</span>
+      <Select
+        value={selectedId === null ? "none" : String(selectedId)}
+        onValueChange={(v) => onChange(v === "none" ? null : Number(v))}
+      >
+        <SelectTrigger className="w-[260px]">
+          <SelectValue placeholder="Velg serie (valgfritt)" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Ingen serie (frittstående)</SelectItem>
+          {series.map((s) => (
+            <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button variant="ghost" size="sm" onClick={() => setCreating(true)}>
+        <FolderPlus className="h-4 w-4 mr-1" />
+        Ny serie
+      </Button>
+
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ny erfaringsmøte-serie</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div>
+              <Label htmlFor="series-name">Navn</Label>
+              <Input
+                id="series-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="F.eks. Bryggveien-prosjektet"
+              />
+            </div>
+            <div>
+              <Label htmlFor="series-desc">Beskrivelse (valgfritt)</Label>
+              <Textarea
+                id="series-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Kort om hva prosjektet handler om — gir AI bedre kontekst"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreating(false)}>Avbryt</Button>
+            <Button onClick={handleCreate} disabled={!name.trim() || saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Opprett
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function ExperienceSessionView({ id }: { id: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
-  const { data, isLoading } = useQuery<{ session: ExperienceSession; lessons: LessonLearned[] }>({
+  const { data, isLoading } = useQuery<{
+    session: ExperienceSession;
+    lessons: LessonLearned[];
+    attachments: ExperienceAttachment[];
+    openSeriesLessons: LessonLearned[];
+  }>({
     queryKey: [`/api/experience/sessions/${id}`],
   });
 
@@ -322,6 +444,12 @@ function ExperienceSessionView({ id }: { id: number }) {
     queryKey: ["/api/word-corrections"],
   });
   const wordCorrections = corrData?.corrections ?? [];
+
+  // Liste av serier for visning av tilhørighet
+  const { data: seriesData } = useQuery<{ series: ExperienceSeries[] }>({
+    queryKey: ["/api/experience/series"],
+  });
+  const allSeries = seriesData?.series ?? [];
 
   const [titleEdit, setTitleEdit] = useState<string | null>(null);
   const [transcriptEdit, setTranscriptEdit] = useState<string | null>(null);
@@ -338,6 +466,11 @@ function ExperienceSessionView({ id }: { id: number }) {
 
   const session = data?.session;
   const lessons = data?.lessons ?? [];
+  const attachments = data?.attachments ?? [];
+  const openSeriesLessons = data?.openSeriesLessons ?? [];
+  const currentSeries = session?.seriesId
+    ? allSeries.find((s) => s.id === session.seriesId)
+    : undefined;
 
   // Sync første gang vi har data — etter det er liveTranscript autoritativt.
   if (liveTranscript === null && session?.transcript) {
@@ -391,14 +524,24 @@ function ExperienceSessionView({ id }: { id: number }) {
   const extractMutation = useMutation({
     mutationFn: async () => {
       const resp = await apiRequest("POST", `/api/experience/sessions/${id}/extract`, {});
-      return resp.json() as Promise<{ proposals: ProposedLesson[] }>;
+      return resp.json() as Promise<{
+        proposals: ProposedLesson[];
+        contextUsed?: { attachmentsCount: number; openLessonsCount: number; priorKnowledgeCount: number };
+      }>;
     },
     onSuccess: (data) => {
       setProposals(data.proposals);
       setExtracting(false);
+      const ctx = data.contextUsed;
+      const ctxParts: string[] = [];
+      if (ctx?.attachmentsCount) ctxParts.push(`${ctx.attachmentsCount} vedlegg`);
+      if (ctx?.openLessonsCount) ctxParts.push(`${ctx.openLessonsCount} tidligere lærdommer`);
+      if (ctx?.priorKnowledgeCount) ctxParts.push(`${ctx.priorKnowledgeCount} hjerne-treff`);
       toast({
         title: `Fant ${data.proposals.length} lærdommer`,
-        description: "Gjennomgå og godkjenn de du vil lagre.",
+        description: ctxParts.length
+          ? `AI brukte ${ctxParts.join(", ")} som kontekst. Gjennomgå og godkjenn.`
+          : "Gjennomgå og godkjenn de du vil lagre.",
       });
     },
     onError: (err: any) => {
@@ -682,6 +825,60 @@ function ExperienceSessionView({ id }: { id: number }) {
         </Button>
       </div>
 
+      {currentSeries && (
+        <div className="mb-6 flex items-center gap-2 text-sm">
+          <Badge variant="secondary" className="font-normal">
+            <FolderPlus className="h-3 w-3 mr-1" />
+            {currentSeries.name}
+          </Badge>
+          {currentSeries.description && (
+            <span className="text-xs text-muted-foreground italic">{currentSeries.description}</span>
+          )}
+        </div>
+      )}
+
+      {openSeriesLessons.length > 0 && (
+        <Section
+          title="Fra forrige gang"
+          description="Åpne lærdommer fra tidligere sesjoner i samme serie. AI vil bruke disse som kontekst når dere ekstraherer nye lærdommer."
+        >
+          <div className="space-y-2">
+            {openSeriesLessons.map((lesson) => (
+              <Card key={lesson.id} className="p-3 border-l-2 border-l-amber-400 bg-amber-50/40 dark:bg-amber-900/10">
+                <div className="flex items-start gap-2">
+                  <Clock className="h-4 w-4 mt-0.5 text-amber-600 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{lesson.title}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      <span className="font-medium">Læring:</span> {lesson.solution}
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] uppercase">{lesson.status}</Badge>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section
+        title="Vedlegg"
+        description="Last opp dokumenter (PDF, Word, Excel) som diskuteres i møtet. AI får tekst-innholdet som kontekst ved ekstraksjon, og dokumentet blir søkbart i hjernen."
+        actions={<AttachmentUploadButton sessionId={id} />}
+      >
+        {attachments.length === 0 ? (
+          <Panel className="p-4 text-sm text-muted-foreground">
+            Ingen vedlegg ennå. Trykk «Last opp» for å legge til.
+          </Panel>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {attachments.map((att) => (
+              <AttachmentCard key={att.id} attachment={att} sessionId={id} />
+            ))}
+          </div>
+        )}
+      </Section>
+
       <Section
         title="Transkript"
         actions={
@@ -915,6 +1112,11 @@ function ExperienceSessionView({ id }: { id: number }) {
                 <ProposalCard
                   key={proposal.id}
                   proposal={proposal}
+                  relatedLesson={
+                    proposal.relatesToLessonId
+                      ? openSeriesLessons.find((l) => l.id === proposal.relatesToLessonId)
+                      : undefined
+                  }
                   onChange={(updated) =>
                     setProposals((prev) => prev.map((p) => (p.id === proposal.id ? updated : p)))
                   }
@@ -935,12 +1137,14 @@ function ExperienceSessionView({ id }: { id: number }) {
 
 function ProposalCard({
   proposal,
+  relatedLesson,
   onChange,
   onApprove,
   onReject,
   saving,
 }: {
   proposal: ProposedLesson;
+  relatedLesson?: LessonLearned;
   onChange: (updated: ProposedLesson) => void;
   onApprove: () => void;
   onReject: () => void;
@@ -948,6 +1152,15 @@ function ProposalCard({
 }) {
   return (
     <Card className="p-4 border-l-4 border-l-primary">
+      {relatedLesson && (
+        <div className="mb-3 p-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 text-xs flex items-start gap-2">
+          <History className="h-3.5 w-3.5 mt-0.5 text-amber-700 dark:text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <span className="font-medium">Oppfølging til:</span> «{relatedLesson.title}»
+            <span className="ml-1 text-muted-foreground">({relatedLesson.status})</span>
+          </div>
+        </div>
+      )}
       <Input
         value={proposal.title}
         onChange={(e) => onChange({ ...proposal, title: e.target.value })}
@@ -993,6 +1206,108 @@ function ProposalCard({
           Avvis
         </Button>
       </div>
+    </Card>
+  );
+}
+
+function AttachmentUploadButton({ sessionId }: { sessionId: number }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handle = async (file: File) => {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch(`/api/experience/sessions/${sessionId}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+        body: formData,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Opplasting feilet");
+      }
+      queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
+      toast({ title: "Vedlegg lagt til", description: file.name });
+    } catch (err: any) {
+      toast({ title: "Opplasting feilet", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx,.xlsx,.xls,.txt,image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handle(f);
+          e.target.value = "";
+        }}
+      />
+      <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={uploading}>
+        {uploading ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            Laster opp…
+          </>
+        ) : (
+          <>
+            <Paperclip className="h-4 w-4 mr-2" />
+            Last opp vedlegg
+          </>
+        )}
+      </Button>
+    </>
+  );
+}
+
+function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttachment; sessionId: number }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!confirm(`Slette vedlegget "${attachment.filename}"?`)) return;
+    setDeleting(true);
+    try {
+      await apiRequest("DELETE", `/api/experience/attachments/${attachment.id}`);
+      queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
+      toast({ title: "Vedlegg slettet" });
+    } catch (err: any) {
+      toast({ title: "Sletting feilet", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const preview = attachment.extractedText.slice(0, 140);
+
+  return (
+    <Card className="p-3 flex items-start gap-3">
+      <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm truncate">{attachment.filename}</div>
+        <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={handleDelete}
+        disabled={deleting}
+        className="h-7 w-7 shrink-0"
+        aria-label="Slett vedlegg"
+      >
+        {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+      </Button>
     </Card>
   );
 }

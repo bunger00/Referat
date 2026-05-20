@@ -1,6 +1,6 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, experienceSessions, lessonsLearned, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal, type ExperienceSession, type InsertExperienceSession, type LessonLearned, type InsertLessonLearned } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, experienceSessions, lessonsLearned, experienceSeries, experienceAttachments, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal, type ExperienceSession, type InsertExperienceSession, type LessonLearned, type InsertLessonLearned, type ExperienceSeries, type InsertExperienceSeries, type ExperienceAttachment, type InsertExperienceAttachment } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 // Every per-user method takes userId from the JWT-validated request and
 // scopes the query to that user's rows. There's no "global" scope for owned
@@ -77,9 +77,23 @@ export interface IStorage {
   updateExperienceSession(userId: string, id: number, updates: Record<string, unknown>): Promise<ExperienceSession | undefined>;
   deleteExperienceSession(userId: string, id: number): Promise<boolean>;
 
+  // Experience series (prosjekt-/temagruppering for erfaringsmøter)
+  getExperienceSeries(userId: string): Promise<ExperienceSeries[]>;
+  getExperienceSeriesById(userId: string, id: number): Promise<ExperienceSeries | undefined>;
+  createExperienceSeries(userId: string, data: Omit<InsertExperienceSeries, "userId">): Promise<ExperienceSeries>;
+  updateExperienceSeries(userId: string, id: number, updates: Partial<Omit<InsertExperienceSeries, "userId">>): Promise<ExperienceSeries | undefined>;
+  deleteExperienceSeries(userId: string, id: number): Promise<boolean>;
+  getSessionsInExperienceSeries(userId: string, seriesId: number): Promise<ExperienceSession[]>;
+
+  // Experience attachments (dokumenter knyttet til en erfaringsmøte-sesjon)
+  getExperienceAttachments(userId: string, sessionId: number): Promise<ExperienceAttachment[]>;
+  createExperienceAttachment(userId: string, data: Omit<InsertExperienceAttachment, "userId">): Promise<ExperienceAttachment>;
+  deleteExperienceAttachment(userId: string, id: number): Promise<boolean>;
+
   // Lessons learned (strukturerte lærdommer fra erfaringsmøter)
   getLessons(userId: string): Promise<LessonLearned[]>;
   getLessonsForSession(userId: string, sessionId: number): Promise<LessonLearned[]>;
+  getLessonsInSeries(userId: string, seriesId: number): Promise<LessonLearned[]>;
   createLesson(userId: string, data: Omit<InsertLessonLearned, "userId">): Promise<LessonLearned>;
   updateLesson(userId: string, id: number, updates: Record<string, unknown>): Promise<LessonLearned | undefined>;
   deleteLesson(userId: string, id: number): Promise<boolean>;
@@ -575,6 +589,91 @@ export class DatabaseStorage implements IStorage {
   async deleteLesson(userId: string, id: number): Promise<boolean> {
     const result = await db.delete(lessonsLearned)
       .where(and(eq(lessonsLearned.id, id), eq(lessonsLearned.userId, userId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  async getLessonsInSeries(userId: string, seriesId: number): Promise<LessonLearned[]> {
+    const sessions = await db.select({ id: experienceSessions.id }).from(experienceSessions)
+      .where(and(eq(experienceSessions.userId, userId), eq(experienceSessions.seriesId, seriesId)));
+    const sessionIds = sessions.map((s) => s.id);
+    if (sessionIds.length === 0) return [];
+    return await db.select().from(lessonsLearned)
+      .where(and(
+        eq(lessonsLearned.userId, userId),
+        inArray(lessonsLearned.sessionId, sessionIds),
+      ))
+      .orderBy(desc(lessonsLearned.createdAt));
+  }
+
+  // ============= Experience series =============
+
+  async getExperienceSeries(userId: string): Promise<ExperienceSeries[]> {
+    return await db.select().from(experienceSeries)
+      .where(eq(experienceSeries.userId, userId))
+      .orderBy(desc(experienceSeries.updatedAt));
+  }
+
+  async getExperienceSeriesById(userId: string, id: number): Promise<ExperienceSeries | undefined> {
+    const [row] = await db.select().from(experienceSeries)
+      .where(and(eq(experienceSeries.id, id), eq(experienceSeries.userId, userId)));
+    return row || undefined;
+  }
+
+  async createExperienceSeries(userId: string, data: Omit<InsertExperienceSeries, "userId">): Promise<ExperienceSeries> {
+    const [row] = await db.insert(experienceSeries)
+      .values({ ...data, userId } as any)
+      .returning();
+    return row;
+  }
+
+  async updateExperienceSeries(userId: string, id: number, updates: Partial<Omit<InsertExperienceSeries, "userId">>): Promise<ExperienceSeries | undefined> {
+    const [row] = await db.update(experienceSeries)
+      .set({ ...updates, updatedAt: new Date() } as any)
+      .where(and(eq(experienceSeries.id, id), eq(experienceSeries.userId, userId)))
+      .returning();
+    return row || undefined;
+  }
+
+  async deleteExperienceSeries(userId: string, id: number): Promise<boolean> {
+    // Sett seriesId = null på alle tilhørende sesjoner først så de ikke
+    // blir orphan (foreldreløse referanser).
+    await db.update(experienceSessions)
+      .set({ seriesId: null } as any)
+      .where(and(eq(experienceSessions.userId, userId), eq(experienceSessions.seriesId, id)));
+    const result = await db.delete(experienceSeries)
+      .where(and(eq(experienceSeries.id, id), eq(experienceSeries.userId, userId)))
+      .returning();
+    return result.length > 0;
+  }
+
+  async getSessionsInExperienceSeries(userId: string, seriesId: number): Promise<ExperienceSession[]> {
+    return await db.select().from(experienceSessions)
+      .where(and(eq(experienceSessions.userId, userId), eq(experienceSessions.seriesId, seriesId)))
+      .orderBy(desc(experienceSessions.startedAt));
+  }
+
+  // ============= Experience attachments =============
+
+  async getExperienceAttachments(userId: string, sessionId: number): Promise<ExperienceAttachment[]> {
+    return await db.select().from(experienceAttachments)
+      .where(and(
+        eq(experienceAttachments.userId, userId),
+        eq(experienceAttachments.sessionId, sessionId),
+      ))
+      .orderBy(desc(experienceAttachments.createdAt));
+  }
+
+  async createExperienceAttachment(userId: string, data: Omit<InsertExperienceAttachment, "userId">): Promise<ExperienceAttachment> {
+    const [row] = await db.insert(experienceAttachments)
+      .values({ ...data, userId } as any)
+      .returning();
+    return row;
+  }
+
+  async deleteExperienceAttachment(userId: string, id: number): Promise<boolean> {
+    const result = await db.delete(experienceAttachments)
+      .where(and(eq(experienceAttachments.id, id), eq(experienceAttachments.userId, userId)))
       .returning();
     return result.length > 0;
   }

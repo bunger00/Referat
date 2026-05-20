@@ -3,7 +3,6 @@ import multer from "multer";
 import { requireAuth, getUserId } from "../auth";
 import { storage } from "../storage";
 import { logger } from "../lib/logger";
-import { openai } from "../lib/openai-client";
 import {
   ingestText,
   ingestLesson,
@@ -13,6 +12,7 @@ import {
   isIngested,
 } from "../lib/knowledge";
 import { answerWithBrain } from "../lib/brain-chat";
+import { parseUploadedFile, UnsupportedFileTypeError } from "../lib/file-parsers";
 import { chatMessageSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -24,71 +24,6 @@ const upload = multer({
 const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1),
 });
-
-async function parsePdfBuffer(buf: Buffer): Promise<string> {
-  const mod = await import("pdf-parse");
-  const fn = (mod as any).default ?? mod;
-  const result = await fn(buf);
-  return result.text || "";
-}
-
-async function parseDocxBuffer(buf: Buffer): Promise<string> {
-  const mod = await import("mammoth");
-  const fn = (mod as any).default?.extractRawText ?? (mod as any).extractRawText;
-  const result = await fn({ buffer: buf });
-  return result.value || "";
-}
-
-/**
- * Parser et Excel-regneark til ren tekst. Hver ark blir et avsnitt med
- * tab-separerte rader slik at AI-en kan lese tabellen som strukturert
- * tekst og citer celler ved behov. Vi inkluderer ark-navnet som overskrift
- * for kontekst.
- */
-async function parseXlsxBuffer(buf: Buffer): Promise<string> {
-  const ExcelJS = (await import("exceljs")).default;
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buf as unknown as ArrayBuffer);
-  const sheets: string[] = [];
-  for (const sheet of wb.worksheets) {
-    const rows: string[] = [];
-    sheet.eachRow({ includeEmpty: false }, (row) => {
-      const cells: string[] = [];
-      row.eachCell({ includeEmpty: false }, (cell) => {
-        const v = cell.value;
-        if (v === null || v === undefined) return;
-        if (typeof v === "object" && "text" in v) cells.push(String((v as any).text));
-        else if (typeof v === "object" && "result" in v) cells.push(String((v as any).result));
-        else cells.push(String(v));
-      });
-      if (cells.length) rows.push(cells.join("\t"));
-    });
-    if (rows.length) sheets.push(`## Ark: ${sheet.name}\n${rows.join("\n")}`);
-  }
-  return sheets.join("\n\n");
-}
-
-async function describeImageWithVision(buf: Buffer, mimeType: string): Promise<string> {
-  const base64 = buf.toString("base64");
-  const resp = await openai.chat.completions.create({
-    model: "gpt-5",
-    messages: [
-      {
-        role: "system",
-        content:
-          "Du er en analytisk leser av bilder. Beskriv hva som vises slik at noen kan slå opp innholdet senere uten å se bildet. Inkluder tekst som synes, diagrammer, viktige objekter og kontekst. Svar på norsk.",
-      },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "Beskriv dette bildet med fokus på kunnskapsverdi:" },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
-        ] as any,
-      },
-    ],
-  });
-  return resp.choices[0]?.message?.content?.trim() ?? "";
-}
 
 export function registerBrainRoutes(app: Express) {
   /**
@@ -113,63 +48,35 @@ export function registerBrainRoutes(app: Express) {
 
   /**
    * POST /api/brain/upload
-   * Multipart-skjema med en fil. Parser PDF/Word/bilde til tekst og ingester
-   * til knowledge_chunks. Returnerer antall chunks som ble lagt til.
-   *
-   * Excel-støtte: ikke i MVP. Krever `xlsx`-pakke som ikke er installert ennå.
-   * Legg til den separat når brukeren har behov for det.
+   * Multipart-skjema med en fil. Parser PDF/Word/Excel/bilde/tekst til
+   * tekst og ingester til knowledge_chunks for /hjernen-chat.
    */
   app.post("/api/brain/upload", requireAuth, upload.single("file"), async (req, res) => {
     const userId = getUserId(req);
     try {
       if (!req.file) return res.status(400).json({ error: "Ingen fil mottatt" });
       const { originalname, mimetype, buffer } = req.file;
-      let text = "";
-      let sourceType: "uploaded_doc" | "uploaded_image" = "uploaded_doc";
-
-      if (mimetype === "application/pdf" || originalname.toLowerCase().endsWith(".pdf")) {
-        text = await parsePdfBuffer(buffer);
-      } else if (
-        mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-        originalname.toLowerCase().endsWith(".docx")
-      ) {
-        text = await parseDocxBuffer(buffer);
-      } else if (
-        mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-        mimetype === "application/vnd.ms-excel" ||
-        originalname.toLowerCase().endsWith(".xlsx") ||
-        originalname.toLowerCase().endsWith(".xls")
-      ) {
-        text = await parseXlsxBuffer(buffer);
-      } else if (mimetype.startsWith("image/")) {
-        text = await describeImageWithVision(buffer, mimetype);
-        sourceType = "uploaded_image";
-      } else if (mimetype === "text/plain" || originalname.toLowerCase().endsWith(".txt")) {
-        text = buffer.toString("utf-8");
-      } else {
-        return res.status(400).json({
-          error: `Filtype ikke støttet (${mimetype}). Støttede typer: PDF, Word (.docx), Excel (.xlsx), bilde, tekst.`,
-        });
-      }
-
+      const { text, sourceTypeHint } = await parseUploadedFile({
+        buffer,
+        mimeType: mimetype,
+        filename: originalname,
+      });
       if (!text.trim()) {
         return res.status(400).json({ error: "Klarte ikke å hente ut tekst fra filen." });
       }
-
       const result = await ingestText({
         userId,
-        sourceType,
+        sourceType: sourceTypeHint,
         sourceId: null,
         sourceName: originalname,
         text,
-        metadata: {
-          mimeType: mimetype,
-          uploadedAt: new Date().toISOString(),
-        },
+        metadata: { mimeType: mimetype, uploadedAt: new Date().toISOString() },
       });
-
       res.json({ ok: true, chunks: result.chunks, filename: originalname });
     } catch (error: any) {
+      if (error instanceof UnsupportedFileTypeError) {
+        return res.status(400).json({ error: error.message });
+      }
       logger.error({ err: error.message }, "Brain upload failed");
       res.status(500).json({ error: error.message });
     }
