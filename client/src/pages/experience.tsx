@@ -12,11 +12,13 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { usePcmRecorder } from "@/hooks/usePcmRecorder";
+import { applyWordCorrections } from "@/lib/word-corrections";
 import type {
   ExperienceSession,
   TranscriptSegment,
   ProposedLesson,
   LessonLearned,
+  WordCorrection,
 } from "@shared/schema";
 
 function formatElapsed(seconds: number): string {
@@ -56,6 +58,13 @@ function ExperienceList() {
     queryKey: ["/api/experience/sessions"],
   });
 
+  // Brukerens ord-rettelser anvendes også på opplastede filer slik at
+  // resultatet er identisk med live-opptak og /mote-flyten.
+  const { data: corrData } = useQuery<{ corrections: WordCorrection[] }>({
+    queryKey: ["/api/word-corrections"],
+  });
+  const wordCorrections = corrData?.corrections ?? [];
+
   const sessions = data?.sessions ?? [];
 
   const handleUpload = async (file: File) => {
@@ -80,7 +89,11 @@ function ExperienceList() {
         throw new Error(`Transkripsjon feilet: ${transcribeResp.statusText}`);
       }
       const transcribed = await transcribeResp.json();
-      const segments: TranscriptSegment[] = transcribed.segments ?? [];
+      const rawSegments: TranscriptSegment[] = transcribed.segments ?? [];
+      const segments = rawSegments.map((s) => ({
+        ...s,
+        text: applyWordCorrections(s.text, wordCorrections),
+      }));
 
       // 3. Lagre transkriptet på sessionen
       await apiRequest("PATCH", `/api/experience/sessions/${newSession.id}`, {
@@ -293,6 +306,13 @@ function ExperienceSessionView({ id }: { id: number }) {
     queryKey: [`/api/experience/sessions/${id}`],
   });
 
+  // Brukerens lagrede ord-rettelser — samme kilde som /mote bruker. Anvendes
+  // på hvert nytt segment slik at transkriptet kommer ut med rette ord.
+  const { data: corrData } = useQuery<{ corrections: WordCorrection[] }>({
+    queryKey: ["/api/word-corrections"],
+  });
+  const wordCorrections = corrData?.corrections ?? [];
+
   const [titleEdit, setTitleEdit] = useState<string | null>(null);
   const [transcriptEdit, setTranscriptEdit] = useState<string | null>(null);
   const [proposals, setProposals] = useState<ProposedLesson[]>([]);
@@ -429,13 +449,20 @@ function ExperienceSessionView({ id }: { id: number }) {
 
         const resp = await apiRequest("POST", "/api/transcribe", {
           audio: base64,
-          model: "medium",
+          // Samme default som /mote — OpenAI Whisper håndterer flere snakkere
+          // i samme rom bedre enn nb-whisper-medium ved variabel mic-avstand.
+          model: "openai",
           mimeType: "audio/wav",
         });
         const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
         if (!newSegments?.length) return;
 
-        const updated = [...liveTranscriptRef.current, ...newSegments];
+        // Anvend brukerens ord-rettelser før vi lagrer — identisk med /mote
+        const corrected = newSegments.map((s) => ({
+          ...s,
+          text: applyWordCorrections(s.text, wordCorrections),
+        }));
+        const updated = [...liveTranscriptRef.current, ...corrected];
         liveTranscriptRef.current = updated;
         setLiveTranscript(updated);
 
