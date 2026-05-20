@@ -113,6 +113,21 @@ feedback_log, summary_feedback. (`voice_profiles` er global, ubrukt.)
 **Tabeller med UNIQUE user_id** (per-bruker upsert-mønster):
 ai_preferences, summary_preferences
 
+**Row Level Security (RLS)**:
+- Supabase eksponerer en REST API (PostgREST) over `public`-schema via
+  `anon`/`authenticated`-rollene. Uten RLS kan hvem som helst med anon-nøkkel
+  lese/skrive direkte via REST, og omgå backenden vår.
+- Vi har derfor RLS aktivert på alle `public`-tabeller (uten policies). Backend
+  bruker `postgres`-rollen via `DATABASE_URL` som har `BYPASSRLS`, så våre
+  API-er er upåvirket. Frontend bruker Supabase JS kun til auth, ikke data,
+  så det er heller ikke noe regress der.
+- RLS aktiveres idempotent ved hver deploy via [script/apply-rls.ts](script/apply-rls.ts),
+  som er hektet på `npm run db:push`. Nye tabeller i `public` får RLS automatisk
+  ved neste deploy.
+- Hvis du noen gang trenger å eksponere en tabell direkte via REST (lite
+  sannsynlig — vi har en backend), må du legge til eksplisitte policies FØR
+  du deployer, ellers vil REST gi 0 rader.
+
 ## Required env-vars
 
 **På Render**:
