@@ -277,12 +277,12 @@ function UploadCard() {
         <div className="flex-1">
           <h3 className="font-semibold mb-1">Last opp dokument</h3>
           <p className="text-sm text-muted-foreground mb-3">
-            PDF, Word, bilde eller tekstfil — alt blir søkbart i hjernen din.
+            PDF, Word, Excel, bilde eller tekstfil — alt blir søkbart i hjernen din.
           </p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.txt,image/*"
+            accept=".pdf,.docx,.xlsx,.xls,.txt,image/*"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
