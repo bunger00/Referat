@@ -1390,6 +1390,10 @@ function PptxExportButton({ sessionId }: { sessionId: number }) {
       const match = disp.match(/filename="?([^";]+)"?/i);
       const filename = match ? decodeURIComponent(match[1]) : "erfaringsmote.pptx";
 
+      const attempted = parseInt(resp.headers.get("X-Illustrator-Attempted") || "0", 10);
+      const succeeded = parseInt(resp.headers.get("X-Illustrator-Succeeded") || "0", 10);
+      const illustratorError = resp.headers.get("X-Illustrator-Error");
+
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1399,7 +1403,20 @@ function PptxExportButton({ sessionId }: { sessionId: number }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast({ title: "PowerPoint klar", description: filename });
+
+      if (attempted > 0 && succeeded < attempted) {
+        toast({
+          title: succeeded === 0
+            ? "PowerPoint klar — uten illustrasjoner"
+            : `PowerPoint klar — ${succeeded}/${attempted} illustrasjoner`,
+          description: illustratorError
+            ? `Illustrator-feil: ${illustratorError}`
+            : "Noen AI-illustrasjoner feilet, men slidene er bygget uten dem.",
+          variant: succeeded === 0 ? "destructive" : "default",
+        });
+      } else {
+        toast({ title: "PowerPoint klar", description: filename });
+      }
       setOpen(false);
     } catch (err: any) {
       toast({ title: "Eksport feilet", description: err.message, variant: "destructive" });

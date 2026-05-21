@@ -577,7 +577,7 @@ export function registerExperienceRoutes(app: Express) {
       const opts = bodySchema.parse(req.body ?? {});
 
       const lessons = await storage.getLessonsForSession(userId, id);
-      const { buffer, filename } = await buildExperiencePptx({
+      const { buffer, filename, illustratorStats } = await buildExperiencePptx({
         userId,
         transcript: session.transcript ?? [],
         lessons,
@@ -593,6 +593,20 @@ export function registerExperienceRoutes(app: Express) {
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       );
       res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+      // Diagnostiske headers så klienten kan vise advarsel hvis illustrator
+      // feilet — Access-Control-Expose-Headers gjør at fetch() i nettleseren
+      // får tilgang til dem (Express setter ikke same-origin-blokk for disse).
+      res.setHeader("X-Illustrator-Attempted", String(illustratorStats.attempted));
+      res.setHeader("X-Illustrator-Succeeded", String(illustratorStats.succeeded));
+      if (illustratorStats.firstError) {
+        // Header-verdier må være ASCII — kapp og strip non-ASCII
+        const safe = illustratorStats.firstError.replace(/[^\x20-\x7E]/g, "?").slice(0, 200);
+        res.setHeader("X-Illustrator-Error", safe);
+      }
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        "X-Illustrator-Attempted, X-Illustrator-Succeeded, X-Illustrator-Error, Content-Disposition",
+      );
       res.send(buffer);
     } catch (error: any) {
       logger.error({ err: error.message }, "PPTX export failed");

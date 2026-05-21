@@ -24,13 +24,22 @@ export type ImageFrequency = "every" | "alternate";
 const summarySchema = z.object({
   title: z.string().max(60),
   eyebrow: z.string().max(60),
-  summary: z.string().max(380),
-  // 3-8 takeaways så vi har nok materiale for 8-slide-layouten der hver
-  // takeaway får sin egen side.
-  takeaways: z.array(z.string().max(160)).min(3).max(8),
-  nextStep: z.string().max(220),
-  // Opptil 6 prompts, én per innholdsside. Vi bruker bare så mange som
-  // layouten + bildefrekvensen trenger.
+  // Fyldig sammendrag — bærer hele sammendragsslidet. 400-700 tegn.
+  summary: z.string().min(200).max(700),
+  // Korte one-liners til 3/5-slide-layouten der de listes som bullets.
+  takeaways: z.array(z.string().max(180)).min(3).max(8),
+  // For 8-slide-layouten: én utdypet lærdom per slide. Bodyen elaborer
+  // hvorfor lærdommen er viktig og hva den betyr i praksis (400-700 tegn).
+  detailedLessons: z
+    .array(
+      z.object({
+        title: z.string().max(60),
+        body: z.string().min(200).max(700),
+      }),
+    )
+    .min(3)
+    .max(5),
+  nextStep: z.string().min(80).max(280),
   imagePrompts: z.array(z.string().min(20).max(450)).min(1).max(6),
 });
 
@@ -44,11 +53,19 @@ Output-felter:
 - title: Kort overskrift, max 50 tegn (vil bli ALL CAPS).
 - eyebrow: Liten label, max 50 tegn (vil bli ALL CAPS). Format:
   "ERFARINGSMØTE · 21. MAI 2026" eller "TAKTPLANLEGGING · LEAN CONSTRUCTION".
-- summary: 2-3 setninger, STRIKT max 380 tegn. Direkte, vi/dere-form.
-- takeaways: 3-8 lærdom-bullets, hver STRIKT max 160 tegn. Konkrete,
-  ikke gjenta hverandre. Disse kan brukes hver for seg på egne slides
-  i den detaljerte layouten — så hver bullet må stå alene.
-- nextStep: 1-2 korte setninger om neste skritt. Max 220 tegn.
+- summary: 3-5 setninger som FYLLER sammendragsslidet, 400-700 tegn.
+  Forklar hva møtet handlet om, hvilke spørsmål dere jobbet med og hva
+  konklusjonen er. Direkte, vi/dere-form. IKKE bare én setning.
+- takeaways: 3-8 korte bullets (max 180 tegn hver) til lista-slidet i
+  5-side-layouten. Konkret, ikke gjenta hverandre.
+- detailedLessons: 3-5 utdypede lærdommer for 8-side-layouten — én per
+  slide. Hver har title (max 60 tegn, blir ALL CAPS) og body (200-700
+  tegn). Bodyen skal HA INNHOLD: hva er problemet, hvorfor er det
+  viktig, hva er løsningen, hvilken endring må vi gjøre i praksis. Ikke
+  bare en setning. Flyt som tett prosa, ikke punktliste.
+- nextStep: 2-3 setninger (80-280 tegn) om konkrete neste skritt.
+  Ikke bare "Implementer det vi har lært" — vær konkret om hva, hvem,
+  når. Skal stå alene på en mørkblå closing slide.
 - imagePrompts: 4-6 prompts for AI-illustrator i Byggeplass-stil
   (norske bygg-arbeidere med vernehjelm, gul vest, hørselsvern).
   Hver prompt skal beskrive en KONKRET SCENE — ikke abstrakt. Eksempler:
@@ -56,8 +73,7 @@ Output-felter:
     og post-it-lapper i grønt og hvitt. En peker, en holder tegninger."
   * "Tre bygg-arbeidere i diskusjon foran en byggeplass-modell der noen
     arbeidspakker er markert med rød tape som forsinkelser."
-  Varier scenene — ikke gjentakelser av samme oppsett. Hver scene
-  skal visualisere et tematisk poeng fra møtet.
+  Varier scenene — ikke gjentakelser av samme oppsett.
 
 Output: KUN gyldig JSON, ingen markdown-fences, ingen kommentarer.`;
 
@@ -278,8 +294,10 @@ function addContentSlide(args: ContentSlideArgs) {
   });
   addHairline(slide, 1.65);
 
-  if (args.showImage) {
-    // 2-kolonne med bilde høyre
+  // Bare bygg 2-kolonne-layout hvis vi har et faktisk bilde. Hvis
+  // illustrator feilet får brukeren en clean full-bredde slide istedenfor
+  // en stygg grå plassholder.
+  if (args.showImage && args.image) {
     const bodyW = 6.5;
     slide.addText(args.body as any, {
       x: MARGIN_X, y: 1.95, w: bodyW, h: 5.0,
@@ -291,9 +309,12 @@ function addContentSlide(args: ContentSlideArgs) {
     });
     const imgX = MARGIN_X + bodyW + 0.4;
     const imgW = SLIDE_W - imgX - MARGIN_X;
-    addImageOrPlaceholder(slide, args.image, { x: imgX, y: 1.95, w: imgW, h: 4.5 });
+    slide.addImage({
+      data: `data:${args.image.mimeType};base64,${args.image.buffer.toString("base64")}`,
+      x: imgX, y: 1.95, w: imgW, h: 4.5,
+      sizing: { type: "contain", w: imgW, h: 4.5 },
+    });
   } else {
-    // Full-bredde body, ingen bilde
     slide.addText(args.body as any, {
       x: MARGIN_X, y: 1.95, w: SLIDE_W - 2 * MARGIN_X, h: 5.0,
       fontFace: brand.fonts.body,
@@ -372,25 +393,25 @@ function buildContentSpecs(structure: SummaryStructure, slideCount: SlideCount):
   }
 
   // slideCount === 8: tittel + sammendrag + en-per-lærdom (max 5) + neste-skritt + avslutning
-  // Innholdsslider blir derfor 6 (sammendrag + opp til 5 lærdommer)
-  const lessonSpecs: ContentSlideSpec[] = structure.takeaways
+  // Innholdsslider blir derfor 6 (sammendrag + opp til 5 utdypede lærdommer)
+  const lessonSlides: ContentSlideSpec[] = structure.detailedLessons
     .slice(0, 5)
-    .map((t, idx) => ({
-      eyebrow: `Lærdom ${idx + 1} av ${Math.min(structure.takeaways.length, 5)}`,
-      title: t.split(/[—–:.]/)[0].trim().slice(0, 60) || `Lærdom ${idx + 1}`,
-      body: t,
-      bodyFontSize: 22,
-      lineSpacing: 34,
+    .map((lesson, idx) => ({
+      eyebrow: `Lærdom ${idx + 1} av ${Math.min(structure.detailedLessons.length, 5)}`,
+      title: lesson.title,
+      body: lesson.body,
+      bodyFontSize: 14,
+      lineSpacing: 22,
     }));
   return [
     {
       eyebrow: "Sammendrag",
       title: "Hva vi snakket om",
       body: structure.summary,
-      bodyFontSize: 16,
-      lineSpacing: 26,
+      bodyFontSize: 15,
+      lineSpacing: 24,
     },
-    ...lessonSpecs,
+    ...lessonSlides,
   ];
 }
 
@@ -406,7 +427,7 @@ export async function buildExperiencePptx(args: {
   startedAt?: Date | null;
   slideCount?: SlideCount;
   imageFrequency?: ImageFrequency;
-}): Promise<{ buffer: Buffer; filename: string }> {
+}): Promise<{ buffer: Buffer; filename: string; illustratorStats: { attempted: number; succeeded: number; firstError: string | null } }> {
   const slideCount: SlideCount = args.slideCount ?? 5;
   const imageFrequency: ImageFrequency = args.imageFrequency ?? "every";
 
@@ -428,16 +449,20 @@ export async function buildExperiencePptx(args: {
   );
 
   // Parallelle illustrasjoner — vi kjører bare det antallet vi trenger.
+  // Sporer feil så kalleren kan returnere status til klienten via header.
+  let firstIllustratorError: string | null = null;
   const illustrations: Array<{ buffer: Buffer; mimeType: string } | null> = await Promise.all(
     prompts.map(async (prompt) => {
       try {
         return await generateLeanIllustration({ prompt, style: "Byggeplass" });
       } catch (err: any) {
+        if (!firstIllustratorError) firstIllustratorError = err.message;
         logger.error({ err: err.message, prompt }, "Illustrator call failed");
         return null;
       }
     }),
   );
+  const succeededCount = illustrations.filter((x) => x !== null).length;
 
   // Map illustrasjon til riktig innholdsside ut fra bilde-flags
   const slideImages: Array<{ buffer: Buffer; mimeType: string } | null> = [];
@@ -486,5 +511,13 @@ export async function buildExperiencePptx(args: {
     .trim()
     .replace(/\s+/g, "-");
   const filename = `${safeTitle || "erfaringsmote"}.pptx`;
-  return { buffer: out, filename };
+  return {
+    buffer: out,
+    filename,
+    illustratorStats: {
+      attempted: prompts.length,
+      succeeded: succeededCount,
+      firstError: firstIllustratorError,
+    },
+  };
 }
