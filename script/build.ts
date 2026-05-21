@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, cp } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -54,6 +54,11 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Kopier server-side ressurser (lean-brand tokens + logoer) inn til dist/
+  // slik at lean-brand.ts finner dem via process.cwd() i prod.
+  console.log("copying server assets...");
+  await cp("server/assets", "dist/assets", { recursive: true });
 }
 
 buildAll().catch((err) => {

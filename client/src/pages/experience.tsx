@@ -1206,25 +1206,28 @@ function ExperienceSessionView({ id }: { id: number }) {
           )}
 
           {proposals.length === 0 ? (
-            <Button
-              onClick={() => {
-                setExtracting(true);
-                extractMutation.mutate();
-              }}
-              disabled={extracting}
-            >
-              {extracting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  AI leser gjennom møtet…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  {lessons.length > 0 ? "Ekstraher flere lærdommer" : "Ekstraher lærdommer"}
-                </>
-              )}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => {
+                  setExtracting(true);
+                  extractMutation.mutate();
+                }}
+                disabled={extracting}
+              >
+                {extracting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    AI leser gjennom møtet…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    {lessons.length > 0 ? "Ekstraher flere lærdommer" : "Ekstraher lærdommer"}
+                  </>
+                )}
+              </Button>
+              <PptxExportButton sessionId={id} />
+            </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1358,6 +1361,64 @@ function ProposalCard({
         </Button>
       </div>
     </Card>
+  );
+}
+
+function PptxExportButton({ sessionId }: { sessionId: number }) {
+  const { toast } = useToast();
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const resp = await authFetch(`/api/experience/sessions/${sessionId}/export-pptx`, {
+        method: "POST",
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text.trimStart().startsWith("<") ? "Eksporten brukte for lang tid. Prøv igjen." : text);
+      }
+      // Filnavn fra Content-Disposition, ellers fallback
+      const disp = resp.headers.get("Content-Disposition") || "";
+      const match = disp.match(/filename="?([^";]+)"?/i);
+      const filename = match ? decodeURIComponent(match[1]) : "erfaringsmote.pptx";
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "PowerPoint klar", description: filename });
+    } catch (err: any) {
+      toast({ title: "Eksport feilet", description: err.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      onClick={handleExport}
+      disabled={exporting}
+      title="Generer en én-sides PowerPoint-oppsummering med Lean-illustrasjoner. Tar ca. 60-90 sek."
+    >
+      {exporting ? (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          Lager PowerPoint…
+        </>
+      ) : (
+        <>
+          <FileText className="h-4 w-4 mr-2" />
+          Eksporter til PowerPoint
+        </>
+      )}
+    </Button>
   );
 }
 

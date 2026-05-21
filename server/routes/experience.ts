@@ -7,6 +7,7 @@ import { extractLessons } from "../lib/lesson-extractor";
 import { ingestText, searchKnowledge } from "../lib/knowledge";
 import { parseUploadedFile, UnsupportedFileTypeError } from "../lib/file-parsers";
 import { trackedChatCompletion } from "../lib/ai-tracker";
+import { buildExperiencePptx } from "../lib/pptx-summary";
 import { z } from "zod";
 
 const upload = multer({
@@ -550,6 +551,42 @@ export function registerExperienceRoutes(app: Express) {
       } });
     } catch (error: any) {
       logger.error({ err: error.message }, "Lesson extraction failed");
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Eksporter en én-sides PowerPoint-oppsummering av sesjonen med Lean
+   * Communications-merkevarestiling og AI-genererte illustrasjoner fra
+   * Lean Image Generator. Synchront: AI-summary tar 10-30s, hver
+   * illustrasjon ~30s — totalt 60-90 sek for typisk respons.
+   */
+  app.post("/api/experience/sessions/:id/export-pptx", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
+      const session = await storage.getExperienceSession(userId, id);
+      if (!session) return res.status(404).json({ error: "Ikke funnet" });
+
+      const lessons = await storage.getLessonsForSession(userId, id);
+      const { buffer, filename } = await buildExperiencePptx({
+        userId,
+        transcript: session.transcript ?? [],
+        lessons,
+        meetingTitle: session.title,
+        topic: session.topic,
+        startedAt: session.startedAt,
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      logger.error({ err: error.message }, "PPTX export failed");
       res.status(500).json({ error: error.message });
     }
   });
