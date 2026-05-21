@@ -734,6 +734,26 @@ export const insertExperienceAttachmentSchema = createInsertSchema(experienceAtt
 });
 export type InsertExperienceAttachment = z.infer<typeof insertExperienceAttachmentSchema>;
 
+/**
+ * Engangs-tokens som lar en uautentisert mobil-side laste opp filer til en
+ * spesifikk erfaringsmøte-sesjon. Generert via QR-paring fra desktop-appen.
+ * Tokenet inneholder ingen brukerdata selv — vi slår opp sessionId + userId
+ * via dette oppslaget. Utløpstid (default 1 time) hindrer langvarig misbruk.
+ */
+export const experienceUploadTokens = pgTable("experience_upload_tokens", {
+  id: serial("id").primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  userId: uuid("user_id").notNull(),
+  sessionId: integer("session_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  tokenIdx: index("idx_experience_upload_tokens_token").on(t.token),
+  expiryIdx: index("idx_experience_upload_tokens_expiry").on(t.expiresAt),
+}));
+
+export type ExperienceUploadToken = typeof experienceUploadTokens.$inferSelect;
+
 export const insertExperienceSessionSchema = createInsertSchema(experienceSessions).omit({
   id: true,
   startedAt: true,

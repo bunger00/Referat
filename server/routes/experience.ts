@@ -280,6 +280,111 @@ export function registerExperienceRoutes(app: Express) {
     }
   });
 
+  // ============= QR-paret opplastings-tokens =============
+
+  /**
+   * Generer en engangs-token som brukeren kan dele med en mobil-enhet
+   * (via QR-kode) for å laste opp filer rett til denne sesjonen uten å
+   * logge inn på telefonen. Tokenet utløper etter 1 time.
+   */
+  app.post("/api/experience/sessions/:id/upload-token", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const sessionId = parseInt(req.params.id, 10);
+      if (isNaN(sessionId)) return res.status(400).json({ error: "Ugyldig ID" });
+      const session = await storage.getExperienceSession(userId, sessionId);
+      if (!session) return res.status(404).json({ error: "Ikke funnet" });
+      const tokenRow = await storage.createExperienceUploadToken(userId, sessionId);
+      res.json({
+        token: tokenRow.token,
+        expiresAt: tokenRow.expiresAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Last opp fil via engangs-token (ingen auth-header — tokenet selv er
+   * authoriteten). Tokens er tilfeldige 64-tegns strings med 1t utløp.
+   * Brukes av mobil-siden som scannet QR-koden.
+   */
+  app.post("/api/upload-via-token/:token", upload.single("file"), async (req, res) => {
+    try {
+      const token = req.params.token;
+      const tokenRow = await storage.lookupExperienceUploadToken(token);
+      if (!tokenRow) return res.status(401).json({ error: "Ugyldig eller utløpt token" });
+      const session = await storage.getExperienceSession(tokenRow.userId, tokenRow.sessionId);
+      if (!session) return res.status(404).json({ error: "Sesjon ikke funnet" });
+      if (!req.file) return res.status(400).json({ error: "Ingen fil mottatt" });
+
+      const { originalname, mimetype, buffer, size } = req.file;
+      const { text } = await parseUploadedFile({
+        buffer,
+        mimeType: mimetype,
+        filename: originalname,
+      });
+      if (!text.trim()) {
+        return res.status(400).json({ error: "Klarte ikke å hente ut tekst fra filen." });
+      }
+
+      const attachment = await storage.createExperienceAttachment(tokenRow.userId, {
+        sessionId: tokenRow.sessionId,
+        filename: originalname,
+        mimeType: mimetype,
+        extractedText: text,
+        bytes: size,
+      });
+
+      // Best-effort: embed til hjernen
+      try {
+        await ingestText({
+          userId: tokenRow.userId,
+          sourceType: "uploaded_doc",
+          sourceId: attachment.id,
+          sourceName: `${originalname} (fra ${session.title || `møte ${session.id}`})`,
+          text,
+          metadata: {
+            mimeType: mimetype,
+            experienceSessionId: session.id,
+            uploadedAt: new Date().toISOString(),
+            viaMobileToken: true,
+          },
+        });
+      } catch (err: any) {
+        logger.warn({ err: err.message }, "Mobile token attachment ingest failed (non-fatal)");
+      }
+
+      res.json({ ok: true, filename: originalname });
+    } catch (error: any) {
+      if (error instanceof UnsupportedFileTypeError) {
+        return res.status(400).json({ error: error.message });
+      }
+      logger.error({ err: error.message }, "Token upload failed");
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Info-endepunkt for mobil-siden — viser sesjons-tittel etter token-
+   * validering, slik at brukeren kan bekrefte at de laster opp til rett sted.
+   */
+  app.get("/api/upload-via-token/:token/info", async (req, res) => {
+    try {
+      const token = req.params.token;
+      const tokenRow = await storage.lookupExperienceUploadToken(token);
+      if (!tokenRow) return res.status(401).json({ error: "Ugyldig eller utløpt token" });
+      const session = await storage.getExperienceSession(tokenRow.userId, tokenRow.sessionId);
+      if (!session) return res.status(404).json({ error: "Sesjon ikke funnet" });
+      res.json({
+        sessionTitle: session.title,
+        expiresAt: tokenRow.expiresAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ============= Visual-check =============
 
   app.post("/api/experience/visual-check", requireAuth, async (req, res) => {
