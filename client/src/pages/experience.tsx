@@ -171,9 +171,9 @@ function ExperienceList() {
                 <Mic className="h-5 w-5" />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-base mb-1">Ta opp live</h3>
+                <h3 className="font-semibold text-base mb-1">Ny økt</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Sittegruppa er rundt bordet — start opptak og få sanntids-transkripsjon. AI ekstraherer lærdommer når dere er ferdig.
+                  Opprett en økt — fyll inn tema og vedlegg, så starter du opptak når dere er klare. Du kan også legge til informasjon underveis.
                 </p>
                 <StartLiveSessionButton seriesId={selectedSeriesId} />
               </div>
@@ -261,33 +261,71 @@ function ExperienceList() {
         ) : (
           <div className="grid gap-3">
             {sessions.map((session) => (
-              <Link key={session.id} href={`/erfaring/${session.id}`}>
-                <a className="block">
-                  <Card className="p-4 hover-elevate">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">
-                          {session.title || `Erfaringsmøte ${session.id}`}
-                        </div>
-                        <div className="text-sm text-muted-foreground mt-0.5 flex items-center gap-3">
-                          <span>{formatDate(String(session.startedAt))}</span>
-                          {session.lessonsExtractedAt && (
-                            <Badge variant="secondary" className="text-xs">
-                              Lærdommer ekstrahert
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    </div>
-                  </Card>
-                </a>
-              </Link>
+              <SessionListRow key={session.id} session={session} />
             ))}
           </div>
         )}
       </Section>
     </Page>
+  );
+}
+
+function SessionListRow({ session }: { session: ExperienceSession }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Slette «${session.title || `Erfaringsmøte ${session.id}`}»? Alle lærdommer fra denne sesjonen slettes også.`)) return;
+    setDeleting(true);
+    try {
+      await apiRequest("DELETE", `/api/experience/sessions/${session.id}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
+      toast({ title: "Sesjon slettet" });
+    } catch (err: any) {
+      toast({ title: "Kunne ikke slette", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Link href={`/erfaring/${session.id}`}>
+      <a className="block">
+        <Card className="p-4 hover-elevate">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="font-medium truncate">
+                {session.title || `Erfaringsmøte ${session.id}`}
+              </div>
+              <div className="text-sm text-muted-foreground mt-0.5 flex items-center gap-3">
+                <span>{formatDate(String(session.startedAt))}</span>
+                {session.lessonsExtractedAt && (
+                  <Badge variant="secondary" className="text-xs">
+                    Lærdommer ekstrahert
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDelete}
+                disabled={deleting}
+                aria-label="Slett sesjon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </Button>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+        </Card>
+      </a>
+    </Link>
   );
 }
 
@@ -334,9 +372,11 @@ function StartLiveSessionButton({ seriesId }: { seriesId: number | null }) {
       });
       const session: ExperienceSession = (await resp.json()).session;
       queryClient.invalidateQueries({ queryKey: ["/api/experience/sessions"] });
-      navigate(`/erfaring/${session.id}?autostart=1`);
+      // Naviger til sesjonen UTEN auto-start — brukeren fyller inn tema/vedlegg
+      // og trykker selv "Start opptak" når de er klare.
+      navigate(`/erfaring/${session.id}`);
     } catch (err: any) {
-      toast({ title: "Kunne ikke starte", description: err.message, variant: "destructive" });
+      toast({ title: "Kunne ikke opprette", description: err.message, variant: "destructive" });
     } finally {
       setCreating(false);
     }
@@ -345,7 +385,7 @@ function StartLiveSessionButton({ seriesId }: { seriesId: number | null }) {
   return (
     <Button onClick={handle} disabled={creating} className="w-full sm:w-auto">
       {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mic className="h-4 w-4 mr-2" />}
-      Start opptak nå
+      Forbered ny økt
     </Button>
   );
 }
@@ -813,18 +853,6 @@ function ExperienceSessionView({ id }: { id: number }) {
   );
 
   const recorder = usePcmRecorder({ onChunk: handleChunk });
-
-  // Autostart fra ?autostart=1 (etter "Start opptak nå" på lista)
-  const autostartedRef = useRef(false);
-  if (!autostartedRef.current && typeof window !== "undefined" && session) {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("autostart") === "1" && !recorder.isRecording && !recorder.isStarting) {
-      autostartedRef.current = true;
-      // Fjern query-paramen så vi ikke restarter ved refresh
-      window.history.replaceState(null, "", window.location.pathname);
-      void recorder.start();
-    }
-  }
 
   const handleStopRecording = async () => {
     await recorder.stop();
