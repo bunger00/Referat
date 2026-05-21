@@ -135,12 +135,8 @@ ai_preferences, summary_preferences
 - `SUPABASE_URL` — `https://<ref>.supabase.co` (server-side JWKS-validering)
 - `VITE_SUPABASE_URL` — samme verdi (Vite injecter på build-time)
 - `VITE_SUPABASE_ANON_KEY` — publishable key fra Supabase API settings
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY` — brukes også til PPTX-illustrasjoner via gpt-image-1
 - `HUGGINGFACE_API_KEY`, `HF_NB_WHISPER_MEDIUM_URL`, `HF_NB_WHISPER_LARGE_URL`
-- `LEAN_ILLUSTRATOR_TOKEN` — Bearer-token for Lean Image Generator MCP-en.
-  Uten denne svarer serveren 401 invalid_token og PPTX-eksporten faller
-  tilbake til brukerbilder (eller ingen bilder). URL kan overstyres via
-  `LEAN_ILLUSTRATOR_URL`.
 - `DB_POOL_MAX=10`
 
 **Sett av Render automatisk**: `NODE_ENV=production`, `PORT`
