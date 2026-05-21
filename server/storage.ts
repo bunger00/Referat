@@ -86,8 +86,12 @@ export interface IStorage {
   deleteExperienceSeries(userId: string, id: number): Promise<boolean>;
   getSessionsInExperienceSeries(userId: string, seriesId: number): Promise<ExperienceSession[]>;
 
-  // Experience attachments (dokumenter knyttet til en erfaringsmøte-sesjon)
+  // Experience attachments (dokumenter knyttet til en erfaringsmøte-sesjon).
+  // getExperienceAttachments returnerer IKKE imageData (kan være flere MB
+  // base64 per bilde). Bruk getExperienceAttachment(id) når du faktisk
+  // trenger bildet (visningsdialog, /image-endepunktet).
   getExperienceAttachments(userId: string, sessionId: number): Promise<ExperienceAttachment[]>;
+  getExperienceAttachment(userId: string, id: number): Promise<ExperienceAttachment | undefined>;
   createExperienceAttachment(userId: string, data: Omit<InsertExperienceAttachment, "userId">): Promise<ExperienceAttachment>;
   deleteExperienceAttachment(userId: string, id: number): Promise<boolean>;
 
@@ -657,12 +661,36 @@ export class DatabaseStorage implements IStorage {
   // ============= Experience attachments =============
 
   async getExperienceAttachments(userId: string, sessionId: number): Promise<ExperienceAttachment[]> {
-    return await db.select().from(experienceAttachments)
+    // Eksplisitt kolonneliste — imageData (base64 av bildet) kan være flere
+    // MB per rad, og vi vil ikke laste det på hver sesjons-poll. Klienten
+    // henter bildet via getExperienceAttachment når brukeren åpner det.
+    const rows = await db.select({
+      id: experienceAttachments.id,
+      userId: experienceAttachments.userId,
+      sessionId: experienceAttachments.sessionId,
+      filename: experienceAttachments.filename,
+      mimeType: experienceAttachments.mimeType,
+      extractedText: experienceAttachments.extractedText,
+      bytes: experienceAttachments.bytes,
+      createdAt: experienceAttachments.createdAt,
+    }).from(experienceAttachments)
       .where(and(
         eq(experienceAttachments.userId, userId),
         eq(experienceAttachments.sessionId, sessionId),
       ))
       .orderBy(desc(experienceAttachments.createdAt));
+    // imageData er undefined her — pad ut feltet så typen matcher
+    return rows.map((r) => ({ ...r, imageData: null }));
+  }
+
+  async getExperienceAttachment(userId: string, id: number): Promise<ExperienceAttachment | undefined> {
+    const [row] = await db.select().from(experienceAttachments)
+      .where(and(
+        eq(experienceAttachments.id, id),
+        eq(experienceAttachments.userId, userId),
+      ))
+      .limit(1);
+    return row;
   }
 
   async createExperienceAttachment(userId: string, data: Omit<InsertExperienceAttachment, "userId">): Promise<ExperienceAttachment> {

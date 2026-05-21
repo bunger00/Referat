@@ -718,8 +718,12 @@ export const experienceAttachments = pgTable("experience_attachments", {
   filename: varchar("filename", { length: 255 }).notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
   // Ekstrahert tekst fra dokumentet. Lagres inline slik at vi slipper
-  // re-parse ved hver ekstraksjon. Filen selv lagres ikke.
+  // re-parse ved hver ekstraksjon.
   extractedText: text("extracted_text").notNull(),
+  // For bilde-vedlegg: base64-kodet original (eller JPEG-konvertert fra HEIC)
+  // slik at brukeren kan se selve bildet i etterkant. NULL for dokumenter
+  // (PDF/Word/Excel) — der trenger vi bare extractedText.
+  imageData: text("image_data"),
   bytes: integer("bytes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
