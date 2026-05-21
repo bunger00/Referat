@@ -575,21 +575,23 @@ function ExperienceSessionView({ id }: { id: number }) {
     },
   });
 
+  const persistProposal = async (lesson: ProposedLesson) => {
+    const resp = await apiRequest("POST", "/api/lessons", {
+      sessionId: id,
+      title: lesson.title,
+      problem: lesson.problem,
+      solution: lesson.solution,
+      context: lesson.context,
+      type: lesson.type,
+      tags: lesson.tags,
+      relatedScreenshotIds: lesson.relatedScreenshotIds,
+      relatedDocumentIds: lesson.relatedDocumentIds,
+    });
+    return resp.json();
+  };
+
   const saveLesson = useMutation({
-    mutationFn: async (lesson: ProposedLesson) => {
-      const resp = await apiRequest("POST", "/api/lessons", {
-        sessionId: id,
-        title: lesson.title,
-        problem: lesson.problem,
-        solution: lesson.solution,
-        context: lesson.context,
-        type: lesson.type,
-        tags: lesson.tags,
-        relatedScreenshotIds: lesson.relatedScreenshotIds,
-        relatedDocumentIds: lesson.relatedDocumentIds,
-      });
-      return resp.json();
-    },
+    mutationFn: persistProposal,
     onSuccess: (_data, lesson) => {
       setProposals((prev) => prev.filter((p) => p.id !== lesson.id));
       queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${id}`] });
@@ -597,6 +599,34 @@ function ExperienceSessionView({ id }: { id: number }) {
       toast({ title: "Lærdom lagret i hjernen din" });
     },
   });
+
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const approveAll = async () => {
+    if (bulkApproving || proposals.length === 0) return;
+    setBulkApproving(true);
+    const toSave = [...proposals];
+    let saved = 0;
+    let failed = 0;
+    // Sekvensiell lagring slik at vi får tydelig feedback ved feil og ikke
+    // overbelaster serveren med 20 parallelle embedding-kall.
+    for (const lesson of toSave) {
+      try {
+        await persistProposal(lesson);
+        saved++;
+        setProposals((prev) => prev.filter((p) => p.id !== lesson.id));
+      } catch (err) {
+        failed++;
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${id}`] });
+    queryClient.invalidateQueries({ queryKey: ["/api/lessons"] });
+    setBulkApproving(false);
+    toast({
+      title: failed === 0 ? `${saved} lærdommer lagret` : `${saved} lagret, ${failed} feilet`,
+      description: failed === 0 ? "Alle lærdommer er nå i hjernen din." : "Prøv å godkjenne de gjenstående en og en.",
+      variant: failed === 0 ? "default" : "destructive",
+    });
+  };
 
   const deleteSession = useMutation({
     mutationFn: async () => {
@@ -713,17 +743,39 @@ function ExperienceSessionView({ id }: { id: number }) {
           reader.readAsDataURL(wavBlob);
         });
 
-        // Bygg whisper-prompt fra tema + serie-beskrivelse slik at fagord
-        // (f.eks. "taktplanlegging", "siste-planner") biases inn i transkripsjonen.
-        const promptParts = [session?.topic, currentSeries?.description]
-          .filter((s): s is string => !!s?.trim());
-        const transcriptionPrompt = promptParts.length > 0 ? promptParts.join(". ") : undefined;
+        // Bygg smartere Whisper-prompt: tema + serie + vedlegg-titler + de
+        // siste 2 transkript-segmentene. Whisper har 224-token grense, så vi
+        // bygger en kompakt streng og truncerer.
+        const recent = liveTranscriptRef.current
+          .slice(-2)
+          .map((s) => s.text)
+          .filter(Boolean)
+          .join(" ");
+        const promptParts = [
+          session?.topic,
+          currentSeries?.description,
+          attachments.map((a) => a.filename.replace(/\.[^.]+$/, "")).join(", "),
+          recent,
+        ].filter((s): s is string => !!s?.trim());
+        // ~200 tegn lim opp til 224-token grensen (~4 chars/token)
+        const transcriptionPrompt = promptParts.length > 0
+          ? promptParts.join(". ").slice(0, 800)
+          : undefined;
+
+        const lang = (session?.language as "no" | "en" | "auto") ?? "no";
 
         const resp = await apiRequest("POST", "/api/transcribe", {
           audio: base64,
           model: "openai",
           mimeType: "audio/wav",
+          language: lang,
           ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
+          // AI-renskriving: fiks fagord, oversett ved behov, dropp hallusinasjoner.
+          // Output-språk er alltid norsk for konsistens i transkriptet.
+          cleanup: {
+            topic: session?.topic ?? undefined,
+            targetLanguage: "no",
+          },
         });
         const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
         if (!newSegments?.length) return;
@@ -757,7 +809,7 @@ function ExperienceSessionView({ id }: { id: number }) {
         console.error("Chunk-feil:", err);
       }
     },
-    [captureAndDescribe, persistTranscript, wordCorrections, session?.topic, currentSeries?.description],
+    [captureAndDescribe, persistTranscript, wordCorrections, session?.topic, session?.language, currentSeries?.description, attachments],
   );
 
   const recorder = usePcmRecorder({ onChunk: handleChunk });
@@ -863,8 +915,10 @@ function ExperienceSessionView({ id }: { id: number }) {
         sessionId={id}
         currentSeries={currentSeries}
         topic={session.topic}
+        language={session.language as "no" | "en" | "auto"}
         attachments={attachments}
       />
+
 
       {openSeriesLessons.length > 0 && (
         <details className="mb-4 group">
@@ -1046,6 +1100,16 @@ function ExperienceSessionView({ id }: { id: number }) {
             <TranscriptView
               segments={displayedTranscript}
               autoScroll={recorder.isRecording}
+              onCorrectionSaved={(original, corrected) => {
+                // Anvend korreksjonen retroaktivt på live-transkriptet i denne sesjonen
+                const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, "\\s+");
+                const regex = new RegExp(`\\b${escaped}\\b`, "gi");
+                const updated = liveTranscriptRef.current.map((s) => ({
+                  ...s,
+                  text: s.text.replace(regex, corrected),
+                }));
+                void persistTranscript(updated);
+              }}
             />
             {!recorder.isRecording && (
               <div className="px-4 pb-3">
@@ -1109,7 +1173,38 @@ function ExperienceSessionView({ id }: { id: number }) {
             </Button>
           ) : (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Forslag — godkjenn dem du vil lagre</h3>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold">
+                  {proposals.length} forslag — godkjenn dem du vil lagre
+                </h3>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setProposals([])}
+                    disabled={bulkApproving}
+                  >
+                    Avvis alle
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={approveAll}
+                    disabled={bulkApproving || proposals.length === 0}
+                  >
+                    {bulkApproving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Lagrer…
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Godkjenn alle ({proposals.length})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
               {proposals.map((proposal) => (
                 <ProposalCard
                   key={proposal.id}
@@ -1318,29 +1413,41 @@ function SessionMetaBar({
   sessionId,
   currentSeries,
   topic,
+  language,
   attachments,
 }: {
   sessionId: number;
   currentSeries: ExperienceSeries | undefined;
   topic: string | null;
+  language: "no" | "en" | "auto";
   attachments: ExperienceAttachment[];
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [topicEdit, setTopicEdit] = useState(topic ?? "");
+  const [langEdit, setLangEdit] = useState<"no" | "en" | "auto">(language ?? "no");
   const [saving, setSaving] = useState(false);
-  const lastSavedRef = useRef(topic ?? "");
+  const lastSavedRef = useRef({ topic: topic ?? "", language: language ?? "no" });
 
-  const saveTopic = async () => {
-    const trimmed = topicEdit.trim();
-    if (trimmed === lastSavedRef.current) return;
+  const save = async (next?: { topic?: string; language?: "no" | "en" | "auto" }) => {
+    const trimmedTopic = (next?.topic ?? topicEdit).trim();
+    const lang = next?.language ?? langEdit;
+    if (
+      trimmedTopic === lastSavedRef.current.topic &&
+      lang === lastSavedRef.current.language
+    ) {
+      return;
+    }
     setSaving(true);
     try {
-      await apiRequest("PATCH", `/api/experience/sessions/${sessionId}`, { topic: trimmed || null });
-      lastSavedRef.current = trimmed;
+      await apiRequest("PATCH", `/api/experience/sessions/${sessionId}`, {
+        topic: trimmedTopic || null,
+        language: lang,
+      });
+      lastSavedRef.current = { topic: trimmedTopic, language: lang };
       queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
     } catch (err: any) {
-      toast({ title: "Kunne ikke lagre tema", description: err.message, variant: "destructive" });
+      toast({ title: "Kunne ikke lagre", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -1361,18 +1468,35 @@ function SessionMetaBar({
         <Input
           value={topicEdit}
           onChange={(e) => setTopicEdit(e.target.value)}
-          onBlur={saveTopic}
+          onBlur={() => save()}
           placeholder={currentSeries?.description || "f.eks. taktplanlegging, lean construction"}
           className="h-8 text-sm flex-1"
         />
-        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
       </div>
+      <Select
+        value={langEdit}
+        onValueChange={(v) => {
+          const nextLang = v as "no" | "en" | "auto";
+          setLangEdit(nextLang);
+          void save({ language: nextLang });
+        }}
+      >
+        <SelectTrigger className="h-8 w-[120px] shrink-0 text-sm" aria-label="Lyd-språk">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="no">Norsk</SelectItem>
+          <SelectItem value="en">Engelsk</SelectItem>
+          <SelectItem value="auto">Auto-detekt</SelectItem>
+        </SelectContent>
+      </Select>
       <AttachmentUploadButton sessionId={sessionId} />
       {attachments.length > 0 && (
         <span className="text-xs text-muted-foreground">
           {attachments.length} vedlegg
         </span>
       )}
+      {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
     </div>
   );
 }
@@ -1380,20 +1504,79 @@ function SessionMetaBar({
 function TranscriptView({
   segments,
   autoScroll,
+  onCorrectionSaved,
 }: {
   segments: TranscriptSegment[];
   autoScroll: boolean;
+  onCorrectionSaved?: (original: string, corrected: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [editingCorrection, setEditingCorrection] = useState<{ original: string; corrected: string } | null>(null);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
     scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [autoScroll, segments.length]);
 
+  // Lytt etter tekst-markering inni transkriptet. Når brukeren slipper musa
+  // og det er en ikke-tom selection som ligger inni containeren, vis en
+  // flytende "Rett ord"-knapp ved markeringen.
+  useEffect(() => {
+    const handler = () => {
+      const sel = window.getSelection();
+      const text = sel?.toString().trim() ?? "";
+      if (!text || !sel || sel.rangeCount === 0) {
+        setSelection(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      // Sjekk om selection ligger inni vår container
+      const container = containerRef.current;
+      if (!container || !container.contains(node.nodeType === 3 ? node.parentNode : node)) {
+        setSelection(null);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      setSelection({
+        text,
+        x: rect.left + rect.width / 2 - containerRect.left,
+        y: rect.top - containerRect.top - 8,
+      });
+    };
+    document.addEventListener("mouseup", handler);
+    document.addEventListener("touchend", handler);
+    return () => {
+      document.removeEventListener("mouseup", handler);
+      document.removeEventListener("touchend", handler);
+    };
+  }, []);
+
   if (segments.length === 0) return null;
 
   return (
+    <div ref={containerRef} className="relative">
+      {selection && (
+        <button
+          className="absolute z-10 -translate-x-1/2 -translate-y-full bg-primary text-primary-foreground text-xs font-medium px-2.5 py-1.5 rounded-md shadow-lg hover:bg-primary/90 flex items-center gap-1.5"
+          style={{ left: selection.x, top: selection.y }}
+          onMouseDown={(e) => {
+            // Prevent selection from clearing before we read it
+            e.preventDefault();
+          }}
+          onClick={() => {
+            setEditingCorrection({ original: selection.text, corrected: selection.text });
+            setSelection(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        >
+          <FileText className="h-3 w-3" />
+          Rett ord
+        </button>
+      )}
     <div
       ref={scrollRef}
       className="max-h-[60vh] overflow-y-auto px-5 py-4 space-y-3 bg-card/30"
@@ -1451,5 +1634,102 @@ function TranscriptView({
         );
       })}
     </div>
+    <CorrectionDialog
+      value={editingCorrection}
+      onClose={() => setEditingCorrection(null)}
+      onSaved={(original, corrected) => {
+        setEditingCorrection(null);
+        onCorrectionSaved?.(original, corrected);
+      }}
+    />
+    </div>
+  );
+}
+
+function CorrectionDialog({
+  value,
+  onClose,
+  onSaved,
+}: {
+  value: { original: string; corrected: string } | null;
+  onClose: () => void;
+  onSaved: (original: string, corrected: string) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [original, setOriginal] = useState("");
+  const [corrected, setCorrected] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Synk fra prop ved åpning
+  useEffect(() => {
+    if (value) {
+      setOriginal(value.original);
+      setCorrected(value.corrected);
+    }
+  }, [value]);
+
+  const handleSave = async () => {
+    const o = original.trim();
+    const c = corrected.trim();
+    if (!o || !c || o === c) {
+      toast({ title: "Skriv inn ulik original og korrigert tekst" });
+      return;
+    }
+    setSaving(true);
+    try {
+      await apiRequest("POST", "/api/word-corrections", { original: o, corrected: c });
+      queryClient.invalidateQueries({ queryKey: ["/api/word-corrections"] });
+      toast({
+        title: "Lærdom lagret",
+        description: `«${o}» → «${c}» vil bli anvendt på alle fremtidige transkripter`,
+      });
+      onSaved(o, c);
+    } catch (err: any) {
+      toast({ title: "Kunne ikke lagre", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={value !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Lær AI rett tolkning av ordet</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="correction-original">Slik ble det transkribert</Label>
+            <Input
+              id="correction-original"
+              value={original}
+              onChange={(e) => setOriginal(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          <div>
+            <Label htmlFor="correction-corrected">Slik skal det være</Label>
+            <Input
+              id="correction-corrected"
+              value={corrected}
+              onChange={(e) => setCorrected(e.target.value)}
+              className="font-mono"
+              autoFocus
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Denne korreksjonen lagres permanent og anvendes automatisk på fremtidige opptak. Du kan se og slette alle korreksjoner i Kunnskapsbasen.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Lagre
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
