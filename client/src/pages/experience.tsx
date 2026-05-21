@@ -193,7 +193,7 @@ function ExperienceList() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="audio/*,video/mp4,video/mpeg,.pdf,.docx,.xlsx,.xls,.txt,image/*"
+                  accept="audio/*,video/mp4,video/mpeg,.pdf,.docx,.xlsx,.xls,.txt,image/*,.heic,.heif"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -1370,7 +1370,7 @@ function AttachmentUploadButton({ sessionId }: { sessionId: number }) {
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.docx,.xlsx,.xls,.txt,image/*"
+        accept=".pdf,.docx,.xlsx,.xls,.txt,image/*,.heic,.heif"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
