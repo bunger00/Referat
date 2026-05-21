@@ -83,13 +83,16 @@ export interface ExtractionContext {
 
 function formatAttachments(items?: ExperienceAttachment[]): string {
   if (!items?.length) return "";
-  const blocks = items.map((a) => {
-    // Begrens lengden så vi ikke sprenger context-budsjettet
-    const truncated = a.extractedText.slice(0, 8000);
-    const suffix = a.extractedText.length > 8000 ? "\n[...avkortet]" : "";
+  // Maks 3 mest nylige vedlegg, hver kappet til 4000 tegn — totalt ~12k tegn
+  // som kontekst. Sparer plass for transkript + prior knowledge.
+  const limited = [...items].slice(-3);
+  const blocks = limited.map((a) => {
+    const truncated = a.extractedText.slice(0, 4000);
+    const suffix = a.extractedText.length > 4000 ? "\n[...avkortet]" : "";
     return `### ${a.filename}\n${truncated}${suffix}`;
   });
-  return `\n\nVEDLAGTE DOKUMENTER (diskutert under møtet):\n${blocks.join("\n\n")}`;
+  const note = items.length > 3 ? ` (viser de 3 sist opplastede av ${items.length})` : "";
+  return `\n\nVEDLAGTE DOKUMENTER${note}:\n${blocks.join("\n\n")}`;
 }
 
 function formatOpenLessons(items?: LessonLearned[]): string {
@@ -126,9 +129,30 @@ export async function extractLessons(args: {
   const { userId, transcript, userNotes, meetingTitle, topic, context } = args;
   if (transcript.length === 0) return [];
 
-  const transcriptText = transcript
+  // Avkort transkriptet hvis det er veldig langt for å holde gpt-5-kallet
+  // innenfor Render sin 100s-timeout. For et 1t-møte kan vi ende på 60k+
+  // tegn av transkript alene; samlet med vedlegg + prior knowledge blir
+  // det altfor mye.
+  const MAX_TRANSCRIPT_CHARS = 50_000;
+  const fullTranscript = transcript
     .map((s) => `[${s.timestamp}] ${s.speaker}: ${s.text}`)
     .join("\n");
+  let transcriptText = fullTranscript;
+  if (fullTranscript.length > MAX_TRANSCRIPT_CHARS) {
+    // Behold første 1/3 og siste 2/3 — møter har ofte introduksjon i start
+    // og oppsummering i slutt, og siste delen er der refleksjon/lærdommer
+    // typisk drøftes mest aktivt.
+    const startSize = Math.floor(MAX_TRANSCRIPT_CHARS * 0.33);
+    const endSize = MAX_TRANSCRIPT_CHARS - startSize;
+    transcriptText =
+      fullTranscript.slice(0, startSize) +
+      `\n\n[... ~${Math.floor((fullTranscript.length - MAX_TRANSCRIPT_CHARS) / 1000)}k tegn utelatt for plass ...]\n\n` +
+      fullTranscript.slice(-endSize);
+    logger.info(
+      { originalLength: fullTranscript.length, truncatedTo: transcriptText.length },
+      "Transcript truncated for extraction",
+    );
+  }
 
   const seriesHeader = context?.seriesName
     ? `Prosjekt/serie: ${context.seriesName}${context.seriesDescription ? ` — ${context.seriesDescription}` : ""}`
