@@ -22,6 +22,7 @@ const HistoryPage = lazy(() => import("@/pages/history"));
 const KnowledgePage = lazy(() => import("@/pages/knowledge"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const BrainPage = lazy(() => import("@/pages/brain"));
+const MobileUploadPage = lazy(() => import("@/pages/mobile-upload"));
 
 function PageLoader() {
   return (
@@ -108,12 +109,26 @@ function AuthenticatedRouter() {
   );
 }
 
+function PublicOrAuthenticated() {
+  const [location] = useLocation();
+  // /u/:token-ruten (mobil-paret opplasting) bypasser auth-sjekken. Tokenet
+  // er selv authoritet — gjest skanner QR fra desktop og lastes rett opp.
+  if (location.startsWith("/u/")) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <MobileUploadPage />
+      </Suspense>
+    );
+  }
+  return <AuthenticatedRouter />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <AuthenticatedRouter />
+        <PublicOrAuthenticated />
       </TooltipProvider>
     </QueryClientProvider>
   );

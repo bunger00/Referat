@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain, FolderPlus, Paperclip, History, CheckCircle2, Clock } from "lucide-react";
+import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain, FolderPlus, Paperclip, History, CheckCircle2, Clock, QrCode, Smartphone } from "lucide-react";
 import { Page, PageHeader, Section, Panel, EmptyState } from "@/components/ds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1518,6 +1518,8 @@ function SessionMetaBar({
           <SelectItem value="auto">Auto-detekt</SelectItem>
         </SelectContent>
       </Select>
+      <CameraCaptureButton sessionId={sessionId} />
+      <QrPairButton sessionId={sessionId} />
       <AttachmentUploadButton sessionId={sessionId} />
       {attachments.length > 0 && (
         <span className="text-xs text-muted-foreground">
@@ -1756,6 +1758,273 @@ function CorrectionDialog({
             {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
             Lagre
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CameraCaptureButton({ sessionId }: { sessionId: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        aria-label="Ta bilde med kamera"
+        title="Ta bilde (bruker iPhone via Continuity Camera hvis tilgjengelig)"
+        className="h-8"
+      >
+        <Camera className="h-4 w-4" />
+      </Button>
+      {open && <CameraCaptureDialog sessionId={sessionId} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function CameraCaptureDialog({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState<string>("");
+  const [captured, setCaptured] = useState<{ blob: Blob; dataUrl: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const startStream = useCallback(async (selectedId?: string) => {
+    setError(null);
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      const constraints: MediaStreamConstraints = {
+        video: selectedId
+          ? { deviceId: { exact: selectedId } }
+          : { facingMode: { ideal: "environment" } },
+        audio: false,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => { /* ignore autoplay error */ });
+      }
+      // Etter at vi har fått en stream, kan vi enumerere devices med labels
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const videoIns = all.filter((d) => d.kind === "videoinput");
+      setDevices(videoIns);
+      const current = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      if (current) setDeviceId(current);
+    } catch (err: any) {
+      setError(err?.message || "Kunne ikke åpne kamera. Sjekk at appen har kamera-tillatelse.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void startStream();
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, [startStream]);
+
+  const switchDevice = (id: string) => {
+    setDeviceId(id);
+    void startStream(id);
+  };
+
+  const capture = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, w, h);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+        setCaptured({ blob, dataUrl });
+      },
+      "image/jpeg",
+      0.9,
+    );
+  };
+
+  const upload = async () => {
+    if (!captured) return;
+    setUploading(true);
+    try {
+      const filename = `kamera-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+      const formData = new FormData();
+      formData.append("file", new File([captured.blob], filename, { type: "image/jpeg" }));
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch(`/api/experience/sessions/${sessionId}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+        body: formData,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Opplasting feilet");
+      }
+      queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
+      toast({ title: "Skjermbilde lagt til som vedlegg" });
+      onClose();
+    } catch (err: any) {
+      toast({ title: "Opplasting feilet", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Ta bilde med kamera</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {devices.length > 1 && (
+            <Select value={deviceId} onValueChange={switchDevice}>
+              <SelectTrigger>
+                <SelectValue placeholder="Velg kamera" />
+              </SelectTrigger>
+              <SelectContent>
+                {devices.map((d) => (
+                  <SelectItem key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Kamera ${d.deviceId.slice(0, 6)}…`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {error && (
+            <div className="text-sm text-destructive p-3 rounded-md bg-destructive/10 border border-destructive/30">
+              {error}
+            </div>
+          )}
+          {captured ? (
+            <img src={captured.dataUrl} alt="Tatt bilde" className="w-full rounded-lg border" />
+          ) : (
+            <video ref={videoRef} className="w-full rounded-lg bg-black" playsInline muted />
+          )}
+          <canvas ref={canvasRef} className="hidden" />
+          <p className="text-xs text-muted-foreground">
+            Tips: på Mac kan du velge iPhone som kamera (Continuity Camera) — krever samme Apple ID, WiFi og Bluetooth på begge enheter.
+          </p>
+        </div>
+        <DialogFooter>
+          {captured ? (
+            <>
+              <Button variant="ghost" onClick={() => setCaptured(null)}>Ta nytt bilde</Button>
+              <Button onClick={upload} disabled={uploading}>
+                {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                Lagre som vedlegg
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose}>Avbryt</Button>
+              <Button onClick={capture} disabled={!!error}>
+                <Camera className="h-4 w-4 mr-2" />
+                Knips bilde
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function QrPairButton({ sessionId }: { sessionId: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+        aria-label="QR-paret opplasting"
+        title="Last opp fra mobil via QR-kode"
+        className="h-8"
+      >
+        <Smartphone className="h-4 w-4" />
+      </Button>
+      {open && <QrPairDialog sessionId={sessionId} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
+  const { toast } = useToast();
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [uploadUrl, setUploadUrl] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await apiRequest("POST", `/api/experience/sessions/${sessionId}/upload-token`, {});
+        const { token, expiresAt: exp } = await resp.json() as { token: string; expiresAt: string };
+        const url = `${window.location.origin}/u/${token}`;
+        setUploadUrl(url);
+        setExpiresAt(new Date(exp));
+        // Lazy-import qrcode for å unngå å bundle på initial JS
+        const QRCode = (await import("qrcode")).default;
+        const dataUrl = await QRCode.toDataURL(url, { width: 320, margin: 1 });
+        setQrDataUrl(dataUrl);
+      } catch (err: any) {
+        toast({ title: "Kunne ikke generere QR-kode", description: err.message, variant: "destructive" });
+        onClose();
+      }
+    })();
+  }, [sessionId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Last opp fra mobil</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Skann QR-koden med telefonen din. Tar du bilder eller velger filer på telefonen, lastes de rett opp i denne sesjonen.
+            Ingen innlogging trengs på telefonen — link er gyldig i 1 time.
+          </p>
+          {qrDataUrl ? (
+            <div className="flex justify-center">
+              <img src={qrDataUrl} alt="QR-kode for opplasting" className="rounded-lg border" />
+            </div>
+          ) : (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {uploadUrl && (
+            <div className="text-xs text-center text-muted-foreground break-all px-4">
+              {uploadUrl}
+            </div>
+          )}
+          {expiresAt && (
+            <div className="text-xs text-center text-muted-foreground">
+              Utløper {expiresAt.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Ferdig</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

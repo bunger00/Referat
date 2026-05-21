@@ -1,4 +1,5 @@
-import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, experienceSessions, lessonsLearned, experienceSeries, experienceAttachments, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal, type ExperienceSession, type InsertExperienceSession, type LessonLearned, type InsertLessonLearned, type ExperienceSeries, type InsertExperienceSeries, type ExperienceAttachment, type InsertExperienceAttachment } from "@shared/schema";
+import { voiceProfiles, meetingSessions, meetingSeries, meetingDocuments, ruleDocuments, extractedRulesTable, feedbackLog, aiPreferences, summaryFeedback, summaryPreferences, wordCorrections, interviewSessions, meetingScreenshots, communitySignals, experienceSessions, lessonsLearned, experienceSeries, experienceAttachments, experienceUploadTokens, type VoiceProfile, type InsertVoiceProfile, type MeetingSession, type InsertMeetingSession, type MeetingSeriesRow, type InsertMeetingSeries, type MeetingDocument, type InsertMeetingDocument, type ExtractedRule, type UploadedDocument, type RulesState, type InsertRuleDocument, type InsertExtractedRule, type FeedbackLogEntry, type AiPreferences, type SummaryFeedbackEntry, type SummaryPreferences, type WordCorrection, type InterviewSession, type InsertInterviewSession, type MeetingScreenshot, type InsertMeetingScreenshot, type CommunitySignal, type InsertCommunitySignal, type ExperienceSession, type InsertExperienceSession, type LessonLearned, type InsertLessonLearned, type ExperienceSeries, type InsertExperienceSeries, type ExperienceAttachment, type InsertExperienceAttachment, type ExperienceUploadToken } from "@shared/schema";
+import { gt } from "drizzle-orm";
 import { db } from "./db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 
@@ -676,6 +677,27 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(experienceAttachments.id, id), eq(experienceAttachments.userId, userId)))
       .returning();
     return result.length > 0;
+  }
+
+  // ============= Experience upload tokens (QR-paring) =============
+
+  async createExperienceUploadToken(userId: string, sessionId: number, ttlMs = 60 * 60 * 1000): Promise<ExperienceUploadToken> {
+    // 32 byte tilfeldig hex = 64 tegn
+    const { randomBytes } = await import("crypto");
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + ttlMs);
+    const [row] = await db.insert(experienceUploadTokens)
+      .values({ token, userId, sessionId, expiresAt } as any)
+      .returning();
+    return row;
+  }
+
+  async lookupExperienceUploadToken(token: string): Promise<ExperienceUploadToken | undefined> {
+    if (!token || token.length !== 64) return undefined;
+    const [row] = await db.select().from(experienceUploadTokens)
+      .where(and(eq(experienceUploadTokens.token, token), gt(experienceUploadTokens.expiresAt, new Date())))
+      .limit(1);
+    return row || undefined;
   }
 }
 
