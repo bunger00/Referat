@@ -19,8 +19,17 @@ const ILLUSTRATOR_URL =
   process.env.LEAN_ILLUSTRATOR_URL ||
   "https://lean-illustrator-backend.redground-cd4c18c6.norwayeast.azurecontainerapps.io/mcp";
 
+// Auth-token for Lean Image Generator MCP-serveren. Settes som
+// Authorization: Bearer <token> på alle requests. Hvis ikke satt vil
+// serveren returnere 401 invalid_token.
+const ILLUSTRATOR_TOKEN = process.env.LEAN_ILLUSTRATOR_TOKEN || "";
+
 const PROTOCOL_VERSION = "2025-03-26";
 const TIMEOUT_MS = 120_000;
+
+function authHeaders(): Record<string, string> {
+  return ILLUSTRATOR_TOKEN ? { Authorization: `Bearer ${ILLUSTRATOR_TOKEN}` } : {};
+}
 
 interface JsonRpcResponse {
   jsonrpc?: string;
@@ -134,6 +143,7 @@ export async function generateLeanIllustration(args: {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        ...authHeaders(),
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -171,6 +181,7 @@ export async function generateLeanIllustration(args: {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json, text/event-stream",
+          ...authHeaders(),
           ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
         },
         body: JSON.stringify({
@@ -192,6 +203,7 @@ export async function generateLeanIllustration(args: {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        ...authHeaders(),
         ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
       },
       body: JSON.stringify({
