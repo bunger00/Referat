@@ -140,6 +140,16 @@ export const transcribeRequestSchema = z.object({
   // transkripsjonen mot rett vokabular — f.eks. "taktplanlegging,
   // siste-planner, lean construction".
   prompt: z.string().max(2000).optional(),
+  // Lyd-språk. "auto" lar Whisper detektere. Default for klienter som ikke
+  // sender feltet er "no" (eksisterende oppførsel).
+  language: z.enum(["no", "en", "auto"]).optional(),
+  // Hvis satt, kjør AI-renskriving av segmentene etter Whisper. AI fikser
+  // åpenbare feiltranskripsjoner basert på topic og oversetter til
+  // targetLanguage hvis input er annet språk.
+  cleanup: z.object({
+    topic: z.string().optional(),
+    targetLanguage: z.enum(["no", "en"]).default("no"),
+  }).optional(),
 });
 export type TranscribeRequest = z.infer<typeof transcribeRequestSchema>;
 
@@ -677,6 +687,11 @@ export const experienceSessions = pgTable("experience_sessions", {
   // "lean construction". Brukes som Whisper-prompt for å bias transkripsjon
   // mot rett vokabular og som kontekst når AI ekstraherer lærdommer.
   topic: text("topic"),
+  // Lyd-språk: 'no' (norsk), 'en' (engelsk), 'auto' (la Whisper detektere).
+  // Default 'no'. Hvis foredragsholderen snakker engelsk men du har låst til
+  // 'no', vil Whisper produsere garbled output. 'auto' lar Whisper finne
+  // det selv. Sammen med AI-renskriving sikrer dette norsk output uansett.
+  language: varchar("language", { length: 8 }).notNull().default("no"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   endedAt: timestamp("ended_at"),
   elapsedSeconds: integer("elapsed_seconds").default(0),
