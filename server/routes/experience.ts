@@ -569,6 +569,13 @@ export function registerExperienceRoutes(app: Express) {
       const session = await storage.getExperienceSession(userId, id);
       if (!session) return res.status(404).json({ error: "Ikke funnet" });
 
+      // Valideres mykt — feil verdier faller tilbake til standard.
+      const bodySchema = z.object({
+        slideCount: z.union([z.literal(3), z.literal(5), z.literal(8)]).optional(),
+        imageFrequency: z.enum(["every", "alternate"]).optional(),
+      });
+      const opts = bodySchema.parse(req.body ?? {});
+
       const lessons = await storage.getLessonsForSession(userId, id);
       const { buffer, filename } = await buildExperiencePptx({
         userId,
@@ -577,6 +584,8 @@ export function registerExperienceRoutes(app: Express) {
         meetingTitle: session.title,
         topic: session.topic,
         startedAt: session.startedAt,
+        slideCount: opts.slideCount ?? 5,
+        imageFrequency: opts.imageFrequency ?? "every",
       });
 
       res.setHeader(
