@@ -1364,21 +1364,28 @@ function ProposalCard({
   );
 }
 
+type SlideCount = 3 | 5 | 8;
+type ImageFrequency = "every" | "alternate";
+
 function PptxExportButton({ sessionId }: { sessionId: number }) {
   const { toast } = useToast();
+  const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [slideCount, setSlideCount] = useState<SlideCount>(5);
+  const [imageFrequency, setImageFrequency] = useState<ImageFrequency>("every");
 
   const handleExport = async () => {
     setExporting(true);
     try {
       const resp = await authFetch(`/api/experience/sessions/${sessionId}/export-pptx`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slideCount, imageFrequency }),
       });
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(text.trimStart().startsWith("<") ? "Eksporten brukte for lang tid. Prøv igjen." : text);
       }
-      // Filnavn fra Content-Disposition, ellers fallback
       const disp = resp.headers.get("Content-Disposition") || "";
       const match = disp.match(/filename="?([^";]+)"?/i);
       const filename = match ? decodeURIComponent(match[1]) : "erfaringsmote.pptx";
@@ -1393,6 +1400,7 @@ function PptxExportButton({ sessionId }: { sessionId: number }) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast({ title: "PowerPoint klar", description: filename });
+      setOpen(false);
     } catch (err: any) {
       toast({ title: "Eksport feilet", description: err.message, variant: "destructive" });
     } finally {
@@ -1400,25 +1408,99 @@ function PptxExportButton({ sessionId }: { sessionId: number }) {
     }
   };
 
+  // Antall illustrasjoner som faktisk genereres ut fra valgene. Brukes til
+  // å gi brukeren et realistisk estimat på generingstid.
+  const contentSlides = slideCount - 2; // tittel + avslutning er ikke "content"
+  const imageCount = imageFrequency === "every" ? contentSlides : Math.ceil(contentSlides / 2);
+  const estimateSec = 20 + imageCount * 25;
+
   return (
-    <Button
-      variant="outline"
-      onClick={handleExport}
-      disabled={exporting}
-      title="Generer en én-sides PowerPoint-oppsummering med Lean-illustrasjoner. Tar ca. 60-90 sek."
-    >
-      {exporting ? (
-        <>
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          Lager PowerPoint…
-        </>
-      ) : (
-        <>
-          <FileText className="h-4 w-4 mr-2" />
-          Eksporter til PowerPoint
-        </>
-      )}
-    </Button>
+    <>
+      <Button
+        variant="outline"
+        onClick={() => setOpen(true)}
+        title="Generer en PowerPoint-oppsummering med Lean-illustrasjoner"
+      >
+        <FileText className="h-4 w-4 mr-2" />
+        Eksporter til PowerPoint
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => !exporting && setOpen(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eksporter til PowerPoint</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Antall sider</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { v: 3 as SlideCount, label: "Kort", desc: "3 sider" },
+                  { v: 5 as SlideCount, label: "Standard", desc: "5 sider" },
+                  { v: 8 as SlideCount, label: "Detaljert", desc: "8 sider" },
+                ]).map((opt) => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setSlideCount(opt.v)}
+                    disabled={exporting}
+                    className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
+                      slideCount === opt.v
+                        ? "border-primary bg-primary/5"
+                        : "border-input hover:bg-accent/40"
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Illustrasjoner</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { v: "every" as ImageFrequency, label: "Hver side", desc: "Bilde på alle innholdssider" },
+                  { v: "alternate" as ImageFrequency, label: "Annenhver side", desc: "Halvparten — raskere" },
+                ]).map((opt) => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setImageFrequency(opt.v)}
+                    disabled={exporting}
+                    className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
+                      imageFrequency === opt.v
+                        ? "border-primary bg-primary/5"
+                        : "border-input hover:bg-accent/40"
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground bg-muted/40 rounded-md p-2.5 border">
+              {imageCount} illustrasjon{imageCount === 1 ? "" : "er"} · estimert {estimateSec} sek
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={exporting}>
+              Avbryt
+            </Button>
+            <Button onClick={handleExport} disabled={exporting}>
+              {exporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Lager PowerPoint…
+                </>
+              ) : (
+                "Generer"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
