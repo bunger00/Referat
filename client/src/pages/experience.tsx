@@ -813,29 +813,30 @@ function ExperienceSessionView({ id }: { id: number }) {
 
   return (
     <Page>
-      <div className="flex items-start justify-between gap-4 mb-8">
-        <div className="flex-1 min-w-0">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex-1 min-w-0 flex items-baseline gap-3 flex-wrap">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium shrink-0">
             Erfaringsmøte · {formatDate(String(session.startedAt))}
-          </div>
+          </span>
           {titleEdit !== null ? (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-1">
               <Input
                 value={titleEdit}
                 onChange={(e) => setTitleEdit(e.target.value)}
                 placeholder="Møtetittel"
-                className="text-2xl font-semibold"
+                className="text-lg font-semibold"
+                autoFocus
               />
-              <Button onClick={() => saveTitle.mutate(titleEdit)} disabled={saveTitle.isPending}>
+              <Button size="sm" onClick={() => saveTitle.mutate(titleEdit)} disabled={saveTitle.isPending}>
                 Lagre
               </Button>
-              <Button variant="ghost" onClick={() => setTitleEdit(null)}>
+              <Button size="sm" variant="ghost" onClick={() => setTitleEdit(null)}>
                 Avbryt
               </Button>
             </div>
           ) : (
             <h1
-              className="font-display text-3xl md:text-4xl font-semibold cursor-pointer hover:text-primary"
+              className="font-display text-xl md:text-2xl font-semibold cursor-pointer hover:text-primary truncate"
               onClick={() => setTitleEdit(session.title ?? "")}
               title="Klikk for å redigere"
             >
@@ -852,67 +853,52 @@ function ExperienceSessionView({ id }: { id: number }) {
             }
           }}
           aria-label="Slett"
+          className="h-8 w-8 shrink-0"
         >
           <Trash2 className="h-4 w-4 text-muted-foreground" />
         </Button>
       </div>
 
-      {currentSeries && (
-        <div className="mb-3 flex items-center gap-2 text-sm">
-          <Badge variant="secondary" className="font-normal">
-            <FolderPlus className="h-3 w-3 mr-1" />
-            {currentSeries.name}
-          </Badge>
-          {currentSeries.description && (
-            <span className="text-xs text-muted-foreground italic">{currentSeries.description}</span>
-          )}
-        </div>
-      )}
-
-      <TopicField sessionId={id} initialTopic={session.topic} seriesDescription={currentSeries?.description} />
-
+      <SessionMetaBar
+        sessionId={id}
+        currentSeries={currentSeries}
+        topic={session.topic}
+        attachments={attachments}
+      />
 
       {openSeriesLessons.length > 0 && (
-        <Section
-          title="Fra forrige gang"
-          description="Åpne lærdommer fra tidligere sesjoner i samme serie. AI vil bruke disse som kontekst når dere ekstraherer nye lærdommer."
-        >
-          <div className="space-y-2">
+        <details className="mb-4 group">
+          <summary className="cursor-pointer flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground py-1.5">
+            <Clock className="h-3.5 w-3.5 text-amber-600" />
+            <span className="font-medium">Fra forrige gang ({openSeriesLessons.length})</span>
+            <ArrowRight className="h-3 w-3 transition-transform group-open:rotate-90 ml-auto" />
+          </summary>
+          <div className="space-y-1.5 mt-2 ml-5">
             {openSeriesLessons.map((lesson) => (
-              <Card key={lesson.id} className="p-3 border-l-2 border-l-amber-400 bg-amber-50/40 dark:bg-amber-900/10">
-                <div className="flex items-start gap-2">
-                  <Clock className="h-4 w-4 mt-0.5 text-amber-600 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm">{lesson.title}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                      <span className="font-medium">Læring:</span> {lesson.solution}
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-[10px] uppercase">{lesson.status}</Badge>
-                </div>
-              </Card>
+              <div key={lesson.id} className="text-sm border-l-2 border-amber-400 pl-3 py-1">
+                <div className="font-medium">{lesson.title}</div>
+                <div className="text-xs text-muted-foreground line-clamp-2">{lesson.solution}</div>
+              </div>
             ))}
           </div>
-        </Section>
+        </details>
       )}
 
-      <Section
-        title="Vedlegg"
-        description="Last opp dokumenter (PDF, Word, Excel) som diskuteres i møtet. AI får tekst-innholdet som kontekst ved ekstraksjon, og dokumentet blir søkbart i hjernen."
-        actions={<AttachmentUploadButton sessionId={id} />}
-      >
-        {attachments.length === 0 ? (
-          <Panel className="p-4 text-sm text-muted-foreground">
-            Ingen vedlegg ennå. Trykk «Last opp» for å legge til.
-          </Panel>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
+      {/* Vedlegg-strip — bare synlig hvis vedlegg eksisterer; opplasting skjer fra meta-baren */}
+      {attachments.length > 0 && (
+        <details className="mb-4">
+          <summary className="cursor-pointer flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground py-1.5">
+            <Paperclip className="h-3.5 w-3.5" />
+            <span className="font-medium">{attachments.length} vedlegg</span>
+            <ArrowRight className="h-3 w-3 transition-transform [details[open]_&]:rotate-90 ml-auto" />
+          </summary>
+          <div className="grid gap-2 sm:grid-cols-2 mt-2">
             {attachments.map((att) => (
               <AttachmentCard key={att.id} attachment={att} sessionId={id} />
             ))}
           </div>
-        )}
-      </Section>
+        </details>
+      )}
 
       <Section
         title="Transkript"
@@ -1328,23 +1314,25 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   );
 }
 
-function TopicField({
+function SessionMetaBar({
   sessionId,
-  initialTopic,
-  seriesDescription,
+  currentSeries,
+  topic,
+  attachments,
 }: {
   sessionId: number;
-  initialTopic: string | null;
-  seriesDescription?: string | null;
+  currentSeries: ExperienceSeries | undefined;
+  topic: string | null;
+  attachments: ExperienceAttachment[];
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [topic, setTopic] = useState(initialTopic ?? "");
+  const [topicEdit, setTopicEdit] = useState(topic ?? "");
   const [saving, setSaving] = useState(false);
-  const lastSavedRef = useRef(initialTopic ?? "");
+  const lastSavedRef = useRef(topic ?? "");
 
-  const save = async () => {
-    const trimmed = topic.trim();
+  const saveTopic = async () => {
+    const trimmed = topicEdit.trim();
     if (trimmed === lastSavedRef.current) return;
     setSaving(true);
     try {
@@ -1359,24 +1347,32 @@ function TopicField({
   };
 
   return (
-    <div className="mb-6">
-      <div className="flex items-center gap-2 mb-1.5">
-        <Label htmlFor="topic-input" className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Tema / fagområde
-        </Label>
-        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+    <div className="mb-4 flex items-center gap-2 flex-wrap">
+      {currentSeries && (
+        <Badge variant="secondary" className="font-normal shrink-0" title={currentSeries.description ?? undefined}>
+          <FolderPlus className="h-3 w-3 mr-1" />
+          {currentSeries.name}
+        </Badge>
+      )}
+      <div className="flex items-center gap-1.5 flex-1 min-w-[180px] max-w-xl">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium shrink-0">
+          Tema
+        </span>
+        <Input
+          value={topicEdit}
+          onChange={(e) => setTopicEdit(e.target.value)}
+          onBlur={saveTopic}
+          placeholder={currentSeries?.description || "f.eks. taktplanlegging, lean construction"}
+          className="h-8 text-sm flex-1"
+        />
+        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
       </div>
-      <Input
-        id="topic-input"
-        value={topic}
-        onChange={(e) => setTopic(e.target.value)}
-        onBlur={save}
-        placeholder={seriesDescription || "f.eks. taktplanlegging i bygg, lean construction, agile retrospektiv"}
-        className="text-base"
-      />
-      <p className="text-xs text-muted-foreground mt-1.5">
-        AI bruker dette til å bias transkripsjonen mot rett vokabular og tilpasse lærdoms-formuleringer til ditt fagområde.
-      </p>
+      <AttachmentUploadButton sessionId={sessionId} />
+      {attachments.length > 0 && (
+        <span className="text-xs text-muted-foreground">
+          {attachments.length} vedlegg
+        </span>
+      )}
     </div>
   );
 }
