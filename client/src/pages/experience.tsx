@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, authFetch } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { usePcmRecorder } from "@/hooks/usePcmRecorder";
 import { useScreenCapture } from "@/hooks/use-screen-capture";
@@ -1399,8 +1399,10 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!confirm(`Slette vedlegget "${attachment.filename}"?`)) return;
     setDeleting(true);
     try {
@@ -1415,25 +1417,58 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   };
 
   const preview = attachment.extractedText.slice(0, 140);
+  const isImage = attachment.mimeType?.startsWith("image/");
 
   return (
-    <Card className="p-3 flex items-start gap-3">
-      <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{attachment.filename}</div>
-        <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={handleDelete}
-        disabled={deleting}
-        className="h-7 w-7 shrink-0"
-        aria-label="Slett vedlegg"
+    <>
+      <Card
+        className="p-3 flex items-start gap-3 cursor-pointer hover:bg-accent/40 transition-colors"
+        onClick={() => setShowDetails(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setShowDetails(true);
+          }
+        }}
+        title="Klikk for å se hele tolkningen"
       >
-        {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-      </Button>
-    </Card>
+        <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate">{attachment.filename}</div>
+          <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="h-7 w-7 shrink-0"
+          aria-label="Slett vedlegg"
+        >
+          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+        </Button>
+      </Card>
+      <Dialog open={showDetails} onOpenChange={setShowDetails}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8">{attachment.filename}</DialogTitle>
+          </DialogHeader>
+          <div className="text-xs text-muted-foreground -mt-1">
+            {isImage ? "AI-tolkning av bildet" : "Uthentet tekst fra dokumentet"}
+            {" · "}
+            {attachment.extractedText.length.toLocaleString("nb-NO")} tegn
+          </div>
+          <div className="flex-1 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed bg-muted/40 rounded-md p-4 border">
+            {attachment.extractedText || "(ingen tekst)"}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowDetails(false)}>Lukk</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -1812,7 +1847,13 @@ function CameraCaptureDialog({ sessionId, onClose }: { sessionId: number; onClos
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => { /* ignore autoplay error */ });
+        try {
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          // autoPlay-attributtet skal håndtere det normalt — men hvis play()
+          // her feiler er det viktig at vi viser det, ikke svelger det stille
+          console.warn("Video play() rejected:", playErr);
+        }
       }
       // Etter at vi har fått en stream, kan vi enumerere devices med labels
       const all = await navigator.mediaDevices.enumerateDevices();
@@ -1917,7 +1958,7 @@ function CameraCaptureDialog({ sessionId, onClose }: { sessionId: number; onClos
           {captured ? (
             <img src={captured.dataUrl} alt="Tatt bilde" className="w-full rounded-lg border" />
           ) : (
-            <video ref={videoRef} className="w-full rounded-lg bg-black" playsInline muted />
+            <video ref={videoRef} className="w-full rounded-lg bg-black" autoPlay playsInline muted />
           )}
           <canvas ref={canvasRef} className="hidden" />
           <p className="text-xs text-muted-foreground">
@@ -1969,9 +2010,11 @@ function QrPairButton({ sessionId }: { sessionId: number }) {
 
 function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [uploadUrl, setUploadUrl] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
+  const [uploadsReceived, setUploadsReceived] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -1991,6 +2034,42 @@ function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () =
       }
     })();
   }, [sessionId]);
+
+  // Poll sesjonens vedlegg mens dialogen er åpen — når antallet øker har
+  // mobilen lastet opp et bilde via QR-tokenet, og vi må invalidere
+  // session-cachen så vedlegget dukker opp i forelderens visning.
+  useEffect(() => {
+    let initialCount: number | null = null;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const resp = await authFetch(`/api/experience/sessions/${sessionId}`);
+        if (!resp.ok) return;
+        const data = await resp.json() as { attachments?: ExperienceAttachment[] };
+        const count = data.attachments?.length ?? 0;
+        if (initialCount === null) {
+          initialCount = count;
+          return;
+        }
+        if (count > initialCount) {
+          const delta = count - initialCount;
+          initialCount = count;
+          if (!stopped) {
+            setUploadsReceived((prev) => prev + delta);
+            queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
+          }
+        }
+      } catch {
+        // ignore — neste tick prøver igjen
+      }
+    };
+    const interval = setInterval(tick, 3000);
+    void tick();
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [sessionId, queryClient]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -2020,6 +2099,14 @@ function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () =
           {expiresAt && (
             <div className="text-xs text-center text-muted-foreground">
               Utløper {expiresAt.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          )}
+          {uploadsReceived > 0 && (
+            <div className="flex items-center justify-center gap-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+              <CheckCircle2 className="h-4 w-4" />
+              {uploadsReceived === 1
+                ? "1 fil mottatt fra mobilen"
+                : `${uploadsReceived} filer mottatt fra mobilen`}
             </div>
           )}
         </div>
