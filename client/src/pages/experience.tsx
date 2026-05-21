@@ -1213,6 +1213,10 @@ function ExperienceSessionView({ id }: { id: number }) {
                   extractMutation.mutate();
                 }}
                 disabled={extracting}
+                variant={lessons.length > 0 ? "outline" : "default"}
+                title={lessons.length > 0
+                  ? "Skanner transkriptet på nytt — kan finne nye lærdommer hvis det er kommet mer innhold til siden sist"
+                  : "AI leser hele transkriptet og foreslår alle lærdommer den finner"}
               >
                 {extracting ? (
                   <>
@@ -1222,7 +1226,7 @@ function ExperienceSessionView({ id }: { id: number }) {
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4 mr-2" />
-                    {lessons.length > 0 ? "Ekstraher flere lærdommer" : "Ekstraher lærdommer"}
+                    {lessons.length > 0 ? "Skann på nytt" : "Ekstraher lærdommer"}
                   </>
                 )}
               </Button>

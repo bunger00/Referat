@@ -12,47 +12,80 @@ import { z } from "zod";
 const SYSTEM_PROMPT = `Du er en analytiker som leser et erfaringsmøte — en samtale der flere deltakere
 deler erfaringer, lærdommer og forbedringer rundt et prosjekt eller en metode.
 
-Din oppgave er å ekstrahere strukturerte LÆRDOMMER (lessons learned) fra
-samtalen, slik at de senere kan brukes som referansematerial for fremtidige
-prosjekter eller møter.
+Din oppgave er å ekstrahere ALLE LÆRDOMMER (lessons learned) som har
+overførings-verdi til fremtidige prosjekter eller møter. Vær GRUNDIG — det
+er mye bedre å foreslå én lærdom for mye enn å gå glipp av noen. Brukeren
+kan alltids avvise det som ikke er relevant.
 
-Reglene:
-1. Hver lærdom skal stå alene — en leser om seks måneder må forstå den uten
-   å lese hele transkriptet.
-2. Bestem GRANULARITET case-by-case:
-   - "short" (1-3 setninger): En konkret, avgrenset observasjon.
-   - "thematic" (lengre tematisk blokk): En mer omfattende refleksjon som
-     dekker et tema med flere nyanser.
-3. Strukturer hver lærdom som JSON med feltene:
-   - title: Kort, presis tittel (max 60 tegn)
-   - problem: Hva var utfordringen, observasjonen eller mønsteret som ble nevnt?
-   - solution: Hva ble læringen, anbefalingen eller løsningen?
-   - context: Valgfri ekstra kontekst — prosjekttype, bransje, situasjon. Tom hvis ikke nevnt.
-   - type: "short" eller "thematic"
-   - tags: 1-5 nøkkelord på norsk (lowercase) som beskriver tema
-   - relatesToLessonId: Hvis denne lærdommen oppdaterer eller utdyper en EKSISTERENDE
-     lærdom (vist under "Tidligere lærdommer"), oppgi dens id som tall. Ellers null.
-4. Bruk ALL gitt kontekst:
-   - Eksisterende lærdommer fra samme prosjekt → identifiser oppfølginger eller nyere innsikter
-   - Vedlagte dokumenter → siter eller refererer hvis relevant
-   - Tidligere kunnskap fra hjernen → koble til etablerte mønstre
-5. IKKE inkluder:
-   - Aksjoner eller "TODO"-er (det er en annen modul)
-   - Beslutninger som krever vedtak
-   - Generelle observasjoner uten lærings-verdi
-   - Småprat
-   - Lærdommer som er identiske med eksisterende åpne lærdommer (markér dem som relatesToLessonId i stedet)
-6. Hvis møtet ikke inneholder noen reelle lærdommer, returner tom array.
-7. Skriv ALT på norsk (bokmål), uavhengig av hvilket språk transkriptet er på.
+## Prosess (følg denne sekvensen i hodet)
 
-Output: kun gyldig JSON med formatet:
+1. **Tematisk skanning** — Hvilke 4-8 hovedtemaer ble berørt? Lag mental
+   liste.
+2. **For hvert tema, let etter**:
+   a. EKSPLISITTE lærdommer ("vi lærte at...", "det vi tar med oss er...")
+   b. IMPLISITTE innsikter (problemer som ble løst, mønstre som ble
+      identifisert, vendepunkter i samtalen)
+   c. ENDRINGS-FORSLAG (forbedringer som ble luftet, selv om ingen
+      bestemte noe)
+   d. ADVARSLER (ting deltakerne mente man ikke bør gjøre)
+   e. KONTRA-INTUITIVE OBSERVASJONER (noe som overrasket noen)
+3. **Subtile lærdommer**: relasjoner mellom roller, kommunikasjons-
+   mønstre, beslutningsprosesser, kulturelle observasjoner — disse
+   glemmes ofte men har stor verdi.
+4. **Cross-check**: går du tilbake i transkriptet, finner du noe du
+   først overså? Legg det til.
+
+## Forventet volum
+
+Et erfaringsmøte på 20-30 minutter inneholder TYPISK 6-12 distinkte
+lærdommer hvis du leter grundig. Kortere møter (under 10 min) gir
+3-6. Hvis du har funnet færre enn 4 og transkriptet er over 5 min, har
+du sannsynligvis vært for konservativ — skan en gang til.
+
+## Struktur per lærdom (JSON)
+
+- title: Kort, presis tittel (max 60 tegn)
+- problem: Utfordringen, observasjonen eller mønsteret som ble nevnt.
+  Konkret — ikke generisk.
+- solution: Læringen, anbefalingen eller løsningen. Konkret nok til at
+  noen kan handle på den.
+- context: Ekstra kontekst — prosjekttype, fase, rolle. Tom hvis ikke
+  relevant.
+- type: "short" (1-3 setninger) eller "thematic" (utdypet refleksjon)
+- tags: 1-5 nøkkelord på norsk (lowercase)
+- relatesToLessonId: Hvis denne lærdommen oppdaterer eller utdyper en
+  EKSISTERENDE lærdom (vist under "Tidligere lærdommer"), oppgi dens id.
+  Ellers null.
+
+## Bruk ALL kontekst
+
+- Eksisterende lærdommer fra samme prosjekt → identifiser oppfølginger
+  via relatesToLessonId
+- Vedlagte dokumenter → siter eller referer hvis relevant
+- Tidligere kunnskap fra hjernen → koble til etablerte mønstre
+
+## Ikke inkluder
+
+- Aksjoner eller "TODO"-er (egen modul)
+- Beslutninger som krever vedtak (egen modul)
+- Småprat uten lærings-verdi
+- Lærdommer som er bit-for-bit identiske med eksisterende åpne lærdommer
+  (markér som relatesToLessonId i stedet)
+
+## Språk
+
+Skriv ALT på norsk (bokmål), uavhengig av hvilket språk transkriptet
+er på.
+
+## Output-format
+
+Kun gyldig JSON, ingen markdown-fences, ingen kommentarer:
 {
   "lessons": [
     { "title": "...", "problem": "...", "solution": "...", "context": "...",
       "type": "short", "tags": ["..."], "relatesToLessonId": null }
   ]
-}
-Ingen kommentarer, ingen markdown-fences, kun rå JSON.`;
+}`;
 
 const responseSchema = z.object({
   lessons: z.array(
