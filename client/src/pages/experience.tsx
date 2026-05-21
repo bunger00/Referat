@@ -501,6 +501,10 @@ function ExperienceSessionView({ id }: { id: number }) {
     openSeriesLessons: LessonLearned[];
   }>({
     queryKey: [`/api/experience/sessions/${id}`],
+    // Poll mens sesjonen er åpen så vedlegg fra QR-opplasting eller andre
+    // bakgrunns-skrivere dukker opp uten at brukeren må refreshe. React
+    // Query pauser polling når fanen er skjult, så kostnaden er beskjeden.
+    refetchInterval: 3000,
   });
 
   // Brukerens lagrede ord-rettelser — samme kilde som /mote bruker. Anvendes
@@ -533,6 +537,28 @@ function ExperienceSessionView({ id }: { id: number }) {
   const lessons = data?.lessons ?? [];
   const attachments = data?.attachments ?? [];
   const openSeriesLessons = data?.openSeriesLessons ?? [];
+
+  // Vis en toast straks et nytt vedlegg dukker opp (typisk fra QR-paret
+  // mobilopplasting under et pågående opptak). Initial-tellingen settes på
+  // første render; deretter trigges varsel hver gang antallet øker.
+  const lastAttachmentCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (lastAttachmentCountRef.current === null) {
+      lastAttachmentCountRef.current = attachments.length;
+      return;
+    }
+    if (attachments.length > lastAttachmentCountRef.current) {
+      const newOnes = attachments.slice(0, attachments.length - lastAttachmentCountRef.current);
+      lastAttachmentCountRef.current = attachments.length;
+      for (const att of newOnes) {
+        const isImage = att.mimeType?.startsWith("image/");
+        toast({
+          title: isImage ? "Bilde mottatt og tolket" : "Vedlegg mottatt",
+          description: att.filename,
+        });
+      }
+    }
+  }, [attachments.length]);
   const currentSeries = session?.seriesId
     ? allSeries.find((s) => s.id === session.seriesId)
     : undefined;
@@ -1399,8 +1425,10 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!confirm(`Slette vedlegget "${attachment.filename}"?`)) return;
     setDeleting(true);
     try {
@@ -1415,25 +1443,58 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   };
 
   const preview = attachment.extractedText.slice(0, 140);
+  const isImage = attachment.mimeType?.startsWith("image/");
 
   return (
-    <Card className="p-3 flex items-start gap-3">
-      <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{attachment.filename}</div>
-        <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
-      </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={handleDelete}
-        disabled={deleting}
-        className="h-7 w-7 shrink-0"
-        aria-label="Slett vedlegg"
+    <>
+      <Card
+        className="p-3 flex items-start gap-3 cursor-pointer hover:bg-accent/40 transition-colors"
+        onClick={() => setShowDetails(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setShowDetails(true);
+          }
+        }}
+        title="Klikk for å se hele tolkningen"
       >
-        {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-      </Button>
-    </Card>
+        <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate">{attachment.filename}</div>
+          <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleDelete}
+          disabled={deleting}
+          className="h-7 w-7 shrink-0"
+          aria-label="Slett vedlegg"
+        >
+          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+        </Button>
+      </Card>
+      <Dialog open={showDetails} onOpenChange={setShowDetails}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-8">{attachment.filename}</DialogTitle>
+          </DialogHeader>
+          <div className="text-xs text-muted-foreground -mt-1">
+            {isImage ? "AI-tolkning av bildet" : "Uthentet tekst fra dokumentet"}
+            {" · "}
+            {attachment.extractedText.length.toLocaleString("nb-NO")} tegn
+          </div>
+          <div className="flex-1 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed bg-muted/40 rounded-md p-4 border">
+            {attachment.extractedText || "(ingen tekst)"}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowDetails(false)}>Lukk</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -1812,7 +1873,13 @@ function CameraCaptureDialog({ sessionId, onClose }: { sessionId: number; onClos
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => { /* ignore autoplay error */ });
+        try {
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          // autoPlay-attributtet skal håndtere det normalt — men hvis play()
+          // her feiler er det viktig at vi viser det, ikke svelger det stille
+          console.warn("Video play() rejected:", playErr);
+        }
       }
       // Etter at vi har fått en stream, kan vi enumerere devices med labels
       const all = await navigator.mediaDevices.enumerateDevices();
@@ -1917,7 +1984,7 @@ function CameraCaptureDialog({ sessionId, onClose }: { sessionId: number; onClos
           {captured ? (
             <img src={captured.dataUrl} alt="Tatt bilde" className="w-full rounded-lg border" />
           ) : (
-            <video ref={videoRef} className="w-full rounded-lg bg-black" playsInline muted />
+            <video ref={videoRef} className="w-full rounded-lg bg-black" autoPlay playsInline muted />
           )}
           <canvas ref={canvasRef} className="hidden" />
           <p className="text-xs text-muted-foreground">
@@ -1972,6 +2039,30 @@ function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () =
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [uploadUrl, setUploadUrl] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
+  const [uploadsReceived, setUploadsReceived] = useState(0);
+  const initialAttachmentCountRef = useRef<number | null>(null);
+
+  // Foreldre-komponenten poller allerede session-cachen hvert 3. sek. Vi
+  // leser fra samme cache — så sant et nytt vedlegg dukker opp telles det
+  // her som "X filer mottatt fra mobilen".
+  const { data: sessionData } = useQuery<{
+    attachments?: ExperienceAttachment[];
+  }>({
+    queryKey: [`/api/experience/sessions/${sessionId}`],
+  });
+
+  useEffect(() => {
+    const count = sessionData?.attachments?.length ?? 0;
+    if (initialAttachmentCountRef.current === null) {
+      initialAttachmentCountRef.current = count;
+      return;
+    }
+    const delta = count - initialAttachmentCountRef.current;
+    if (delta > 0) {
+      setUploadsReceived((prev) => prev + delta);
+      initialAttachmentCountRef.current = count;
+    }
+  }, [sessionData?.attachments?.length]);
 
   useEffect(() => {
     (async () => {
@@ -2020,6 +2111,14 @@ function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () =
           {expiresAt && (
             <div className="text-xs text-center text-muted-foreground">
               Utløper {expiresAt.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          )}
+          {uploadsReceived > 0 && (
+            <div className="flex items-center justify-center gap-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+              <CheckCircle2 className="h-4 w-4" />
+              {uploadsReceived === 1
+                ? "1 fil mottatt fra mobilen"
+                : `${uploadsReceived} filer mottatt fra mobilen`}
             </div>
           )}
         </div>

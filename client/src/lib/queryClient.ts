@@ -24,7 +24,15 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Gateway-feil fra Render (502/503/504) gir HTML-feilside, ikke JSON.
+    // Erstatt med en lesbar norsk-melding så toast-en blir forståelig.
+    const looksLikeHtml = text.trimStart().toLowerCase().startsWith("<");
+    const friendly = looksLikeHtml
+      ? res.status === 502 || res.status === 504
+        ? "Tjeneren brukte for lang tid på å svare. Prøv igjen — hvis dette gjentar seg, kan forespørselen være for tung."
+        : "Tjeneren er utilgjengelig akkurat nå. Prøv igjen om litt."
+      : text;
+    throw new Error(`${res.status}: ${friendly}`);
   }
 }
 
