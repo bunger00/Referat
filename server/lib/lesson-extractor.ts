@@ -120,9 +120,10 @@ export async function extractLessons(args: {
   transcript: TranscriptSegment[];
   userNotes?: string | null;
   meetingTitle?: string | null;
+  topic?: string | null;
   context?: ExtractionContext;
 }): Promise<ProposedLesson[]> {
-  const { userId, transcript, userNotes, meetingTitle, context } = args;
+  const { userId, transcript, userNotes, meetingTitle, topic, context } = args;
   if (transcript.length === 0) return [];
 
   const transcriptText = transcript
@@ -133,7 +134,15 @@ export async function extractLessons(args: {
     ? `Prosjekt/serie: ${context.seriesName}${context.seriesDescription ? ` — ${context.seriesDescription}` : ""}`
     : null;
 
+  // Tema-overskriften kommer FØRST i prompten — den setter den domene-
+  // konteksten AI skal lese resten av materialet gjennom og bruke i
+  // formuleringen av lærdommer.
+  const topicHeader = topic?.trim()
+    ? `TEMA/DOMENE: ${topic.trim()}\n(Bruk fagterminologi og uttrykk fra dette domenet når du formulerer lærdommer.)`
+    : null;
+
   const userPrompt = [
+    topicHeader,
     seriesHeader,
     meetingTitle ? `Møtetittel: ${meetingTitle}` : null,
     userNotes?.trim() ? `Brukerens egne notater:\n${userNotes.trim()}` : null,

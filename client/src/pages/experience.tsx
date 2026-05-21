@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, Sparkles, FileText, Loader2, ArrowRight, Trash2, Mic, Square, CircleDot, Monitor, Camera, X, Brain, FolderPlus, Paperclip, History, CheckCircle2, Clock } from "lucide-react";
@@ -713,10 +713,17 @@ function ExperienceSessionView({ id }: { id: number }) {
           reader.readAsDataURL(wavBlob);
         });
 
+        // Bygg whisper-prompt fra tema + serie-beskrivelse slik at fagord
+        // (f.eks. "taktplanlegging", "siste-planner") biases inn i transkripsjonen.
+        const promptParts = [session?.topic, currentSeries?.description]
+          .filter((s): s is string => !!s?.trim());
+        const transcriptionPrompt = promptParts.length > 0 ? promptParts.join(". ") : undefined;
+
         const resp = await apiRequest("POST", "/api/transcribe", {
           audio: base64,
           model: "openai",
           mimeType: "audio/wav",
+          ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
         });
         const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
         if (!newSegments?.length) return;
@@ -750,7 +757,7 @@ function ExperienceSessionView({ id }: { id: number }) {
         console.error("Chunk-feil:", err);
       }
     },
-    [captureAndDescribe, persistTranscript, wordCorrections],
+    [captureAndDescribe, persistTranscript, wordCorrections, session?.topic, currentSeries?.description],
   );
 
   const recorder = usePcmRecorder({ onChunk: handleChunk });
@@ -851,7 +858,7 @@ function ExperienceSessionView({ id }: { id: number }) {
       </div>
 
       {currentSeries && (
-        <div className="mb-6 flex items-center gap-2 text-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm">
           <Badge variant="secondary" className="font-normal">
             <FolderPlus className="h-3 w-3 mr-1" />
             {currentSeries.name}
@@ -861,6 +868,9 @@ function ExperienceSessionView({ id }: { id: number }) {
           )}
         </div>
       )}
+
+      <TopicField sessionId={id} initialTopic={session.topic} seriesDescription={currentSeries?.description} />
+
 
       {openSeriesLessons.length > 0 && (
         <Section
@@ -1046,30 +1056,11 @@ function ExperienceSessionView({ id }: { id: number }) {
             </div>
           </Panel>
         ) : transcriptText ? (
-          <Panel>
-            <div className="text-sm max-h-96 overflow-y-auto p-4 space-y-2">
-              {displayedTranscript.map((seg, idx) => {
-                const isScreen = seg.speaker === "Skjerm";
-                return (
-                  <div
-                    key={seg.id ?? idx}
-                    className={
-                      isScreen
-                        ? "flex gap-2 p-2 rounded-md bg-primary/5 border border-primary/15 text-foreground"
-                        : "flex gap-2 text-muted-foreground"
-                    }
-                  >
-                    {isScreen && <Monitor className="h-4 w-4 mt-0.5 shrink-0 text-primary" />}
-                    <div className="min-w-0 flex-1">
-                      <span className={isScreen ? "font-medium text-primary text-xs uppercase tracking-wider" : "font-mono text-xs"}>
-                        {isScreen ? "Skjerm" : seg.speaker || "—"}
-                      </span>
-                      <span className="ml-2">{seg.text}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <Panel className="overflow-hidden">
+            <TranscriptView
+              segments={displayedTranscript}
+              autoScroll={recorder.isRecording}
+            />
             {!recorder.isRecording && (
               <div className="px-4 pb-3">
                 <Button
@@ -1334,5 +1325,135 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
         {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
       </Button>
     </Card>
+  );
+}
+
+function TopicField({
+  sessionId,
+  initialTopic,
+  seriesDescription,
+}: {
+  sessionId: number;
+  initialTopic: string | null;
+  seriesDescription?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [topic, setTopic] = useState(initialTopic ?? "");
+  const [saving, setSaving] = useState(false);
+  const lastSavedRef = useRef(initialTopic ?? "");
+
+  const save = async () => {
+    const trimmed = topic.trim();
+    if (trimmed === lastSavedRef.current) return;
+    setSaving(true);
+    try {
+      await apiRequest("PATCH", `/api/experience/sessions/${sessionId}`, { topic: trimmed || null });
+      lastSavedRef.current = trimmed;
+      queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
+    } catch (err: any) {
+      toast({ title: "Kunne ikke lagre tema", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-1.5">
+        <Label htmlFor="topic-input" className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+          Tema / fagområde
+        </Label>
+        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+      </div>
+      <Input
+        id="topic-input"
+        value={topic}
+        onChange={(e) => setTopic(e.target.value)}
+        onBlur={save}
+        placeholder={seriesDescription || "f.eks. taktplanlegging i bygg, lean construction, agile retrospektiv"}
+        className="text-base"
+      />
+      <p className="text-xs text-muted-foreground mt-1.5">
+        AI bruker dette til å bias transkripsjonen mot rett vokabular og tilpasse lærdoms-formuleringer til ditt fagområde.
+      </p>
+    </div>
+  );
+}
+
+function TranscriptView({
+  segments,
+  autoScroll,
+}: {
+  segments: TranscriptSegment[];
+  autoScroll: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!autoScroll || !scrollRef.current) return;
+    scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [autoScroll, segments.length]);
+
+  if (segments.length === 0) return null;
+
+  return (
+    <div
+      ref={scrollRef}
+      className="max-h-[60vh] overflow-y-auto px-5 py-4 space-y-3 bg-card/30"
+    >
+      {segments.map((seg, idx) => {
+        const isScreen = seg.speaker === "Skjerm";
+        const speaker = seg.speaker?.trim();
+        // Format timestamp: try to extract HH:MM:SS or HH:MM from ISO-format
+        let displayTime = "";
+        if (seg.timestamp) {
+          try {
+            const d = new Date(seg.timestamp);
+            if (!isNaN(d.getTime())) {
+              displayTime = d.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+            } else if (typeof seg.timestamp === "string" && seg.timestamp.length < 12) {
+              displayTime = seg.timestamp;
+            }
+          } catch { /* keep empty */ }
+        }
+
+        if (isScreen) {
+          return (
+            <div
+              key={seg.id ?? idx}
+              className="flex gap-3 rounded-lg bg-primary/8 border border-primary/20 px-4 py-3"
+            >
+              <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary shrink-0">
+                <Monitor className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-primary">Skjerm</span>
+                  {displayTime && <span className="text-[11px] text-muted-foreground">{displayTime}</span>}
+                </div>
+                <p className="text-[15px] leading-relaxed text-foreground">{seg.text}</p>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={seg.id ?? idx} className="flex gap-3 group">
+            <div className="text-[11px] text-muted-foreground/60 font-mono tabular-nums pt-1.5 w-12 shrink-0">
+              {displayTime}
+            </div>
+            <div className="min-w-0 flex-1">
+              {speaker && (
+                <div className="text-xs font-medium text-muted-foreground mb-0.5">
+                  {speaker}
+                </div>
+              )}
+              <p className="text-[15px] leading-relaxed text-foreground">{seg.text}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }

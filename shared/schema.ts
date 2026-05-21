@@ -136,6 +136,10 @@ export const transcribeRequestSchema = z.object({
   audio: z.string(),
   mimeType: z.string().optional(),
   model: z.enum(["medium", "large", "openai"]).optional(),
+  // Valgfritt domene-hint (max ~224 tokens for Whisper). Brukes til å bias
+  // transkripsjonen mot rett vokabular — f.eks. "taktplanlegging,
+  // siste-planner, lean construction".
+  prompt: z.string().max(2000).optional(),
 });
 export type TranscribeRequest = z.infer<typeof transcribeRequestSchema>;
 
@@ -669,6 +673,10 @@ export const experienceSessions = pgTable("experience_sessions", {
   title: varchar("title", { length: 255 }),
   // Valgfri kobling til en serie/prosjekt. NULL = frittstående sesjon.
   seriesId: integer("series_id"),
+  // Tema/domene for møtet — f.eks. "taktplanlegging i bygg" eller
+  // "lean construction". Brukes som Whisper-prompt for å bias transkripsjon
+  // mot rett vokabular og som kontekst når AI ekstraherer lærdommer.
+  topic: text("topic"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   endedAt: timestamp("ended_at"),
   elapsedSeconds: integer("elapsed_seconds").default(0),

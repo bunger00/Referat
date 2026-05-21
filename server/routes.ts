@@ -177,7 +177,7 @@ async function transcribeWithNbWhisperRaw(audioBuffer: Buffer, model: "medium" |
   return result as HfTranscriptionResult;
 }
 
-async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "audio/webm"): Promise<HfTranscriptionResult> {
+async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "audio/webm", prompt?: string): Promise<HfTranscriptionResult> {
   // Whisper detects format from the file's magic bytes regardless of the
   // filename, but matching the extension to the actual mime keeps logs sane
   // and avoids edge-case rejections.
@@ -193,6 +193,9 @@ async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "aud
     language: "no",
     response_format: "verbose_json",
     timestamp_granularities: ["segment"],
+    // Domene-hint biaser modellen mot rett vokabular. Whisper er hardcoded
+    // til å bruke max 224 tokens av prompten.
+    ...(prompt ? { prompt } : {}),
   });
   const chunks: HfChunk[] = (result.segments || []).map((seg: any) => ({
     timestamp: [seg.start, seg.end] as [number, number],
@@ -254,12 +257,12 @@ function hasTranscriptionContent(result: HfTranscriptionResult): boolean {
   return hasText || hasChunks;
 }
 
-async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium", mimeType?: string): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
+async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium", mimeType?: string, prompt?: string): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
   // OpenAI is only used when the user explicitly picks it. nb-whisper-* will
   // never silently fall back — failures bubble up so the UI can show what's
   // wrong (e.g. paused endpoint).
   if (model === "openai") {
-    const result = await transcribeWithOpenAI(audioBuffer, mimeType);
+    const result = await transcribeWithOpenAI(audioBuffer, mimeType, prompt);
     return { ...result, engine: "openai-whisper" };
   }
 
@@ -517,7 +520,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Ugyldig forespørsel", details: parsed.error.issues });
       }
       
-      const { audio, model, mimeType } = parsed.data;
+      const { audio, model, mimeType, prompt } = parsed.data;
 
       if (!audio || audio.length === 0) {
         return res.json({ segments: [] });
@@ -532,7 +535,7 @@ export async function registerRoutes(
       }
 
       // Transcribe with selected model (default: medium)
-      const transcription = await transcribeAudio(audioBuffer, model ?? "medium", mimeType);
+      const transcription = await transcribeAudio(audioBuffer, model ?? "medium", mimeType, prompt);
       
       // Process the transcription into segments with speaker labels
       const segments = [];
