@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, authFetch } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { usePcmRecorder } from "@/hooks/usePcmRecorder";
 import { useScreenCapture } from "@/hooks/use-screen-capture";
@@ -501,6 +501,10 @@ function ExperienceSessionView({ id }: { id: number }) {
     openSeriesLessons: LessonLearned[];
   }>({
     queryKey: [`/api/experience/sessions/${id}`],
+    // Poll mens sesjonen er åpen så vedlegg fra QR-opplasting eller andre
+    // bakgrunns-skrivere dukker opp uten at brukeren må refreshe. React
+    // Query pauser polling når fanen er skjult, så kostnaden er beskjeden.
+    refetchInterval: 3000,
   });
 
   // Brukerens lagrede ord-rettelser — samme kilde som /mote bruker. Anvendes
@@ -533,6 +537,28 @@ function ExperienceSessionView({ id }: { id: number }) {
   const lessons = data?.lessons ?? [];
   const attachments = data?.attachments ?? [];
   const openSeriesLessons = data?.openSeriesLessons ?? [];
+
+  // Vis en toast straks et nytt vedlegg dukker opp (typisk fra QR-paret
+  // mobilopplasting under et pågående opptak). Initial-tellingen settes på
+  // første render; deretter trigges varsel hver gang antallet øker.
+  const lastAttachmentCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (lastAttachmentCountRef.current === null) {
+      lastAttachmentCountRef.current = attachments.length;
+      return;
+    }
+    if (attachments.length > lastAttachmentCountRef.current) {
+      const newOnes = attachments.slice(0, attachments.length - lastAttachmentCountRef.current);
+      lastAttachmentCountRef.current = attachments.length;
+      for (const att of newOnes) {
+        const isImage = att.mimeType?.startsWith("image/");
+        toast({
+          title: isImage ? "Bilde mottatt og tolket" : "Vedlegg mottatt",
+          description: att.filename,
+        });
+      }
+    }
+  }, [attachments.length]);
   const currentSeries = session?.seriesId
     ? allSeries.find((s) => s.id === session.seriesId)
     : undefined;
@@ -2010,11 +2036,33 @@ function QrPairButton({ sessionId }: { sessionId: number }) {
 
 function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () => void }) {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [uploadUrl, setUploadUrl] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
   const [uploadsReceived, setUploadsReceived] = useState(0);
+  const initialAttachmentCountRef = useRef<number | null>(null);
+
+  // Foreldre-komponenten poller allerede session-cachen hvert 3. sek. Vi
+  // leser fra samme cache — så sant et nytt vedlegg dukker opp telles det
+  // her som "X filer mottatt fra mobilen".
+  const { data: sessionData } = useQuery<{
+    attachments?: ExperienceAttachment[];
+  }>({
+    queryKey: [`/api/experience/sessions/${sessionId}`],
+  });
+
+  useEffect(() => {
+    const count = sessionData?.attachments?.length ?? 0;
+    if (initialAttachmentCountRef.current === null) {
+      initialAttachmentCountRef.current = count;
+      return;
+    }
+    const delta = count - initialAttachmentCountRef.current;
+    if (delta > 0) {
+      setUploadsReceived((prev) => prev + delta);
+      initialAttachmentCountRef.current = count;
+    }
+  }, [sessionData?.attachments?.length]);
 
   useEffect(() => {
     (async () => {
@@ -2034,42 +2082,6 @@ function QrPairDialog({ sessionId, onClose }: { sessionId: number; onClose: () =
       }
     })();
   }, [sessionId]);
-
-  // Poll sesjonens vedlegg mens dialogen er åpen — når antallet øker har
-  // mobilen lastet opp et bilde via QR-tokenet, og vi må invalidere
-  // session-cachen så vedlegget dukker opp i forelderens visning.
-  useEffect(() => {
-    let initialCount: number | null = null;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const resp = await authFetch(`/api/experience/sessions/${sessionId}`);
-        if (!resp.ok) return;
-        const data = await resp.json() as { attachments?: ExperienceAttachment[] };
-        const count = data.attachments?.length ?? 0;
-        if (initialCount === null) {
-          initialCount = count;
-          return;
-        }
-        if (count > initialCount) {
-          const delta = count - initialCount;
-          initialCount = count;
-          if (!stopped) {
-            setUploadsReceived((prev) => prev + delta);
-            queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
-          }
-        }
-      } catch {
-        // ignore — neste tick prøver igjen
-      }
-    };
-    const interval = setInterval(tick, 3000);
-    void tick();
-    return () => {
-      stopped = true;
-      clearInterval(interval);
-    };
-  }, [sessionId, queryClient]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
