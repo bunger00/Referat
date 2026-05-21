@@ -575,21 +575,23 @@ function ExperienceSessionView({ id }: { id: number }) {
     },
   });
 
+  const persistProposal = async (lesson: ProposedLesson) => {
+    const resp = await apiRequest("POST", "/api/lessons", {
+      sessionId: id,
+      title: lesson.title,
+      problem: lesson.problem,
+      solution: lesson.solution,
+      context: lesson.context,
+      type: lesson.type,
+      tags: lesson.tags,
+      relatedScreenshotIds: lesson.relatedScreenshotIds,
+      relatedDocumentIds: lesson.relatedDocumentIds,
+    });
+    return resp.json();
+  };
+
   const saveLesson = useMutation({
-    mutationFn: async (lesson: ProposedLesson) => {
-      const resp = await apiRequest("POST", "/api/lessons", {
-        sessionId: id,
-        title: lesson.title,
-        problem: lesson.problem,
-        solution: lesson.solution,
-        context: lesson.context,
-        type: lesson.type,
-        tags: lesson.tags,
-        relatedScreenshotIds: lesson.relatedScreenshotIds,
-        relatedDocumentIds: lesson.relatedDocumentIds,
-      });
-      return resp.json();
-    },
+    mutationFn: persistProposal,
     onSuccess: (_data, lesson) => {
       setProposals((prev) => prev.filter((p) => p.id !== lesson.id));
       queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${id}`] });
@@ -597,6 +599,34 @@ function ExperienceSessionView({ id }: { id: number }) {
       toast({ title: "Lærdom lagret i hjernen din" });
     },
   });
+
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const approveAll = async () => {
+    if (bulkApproving || proposals.length === 0) return;
+    setBulkApproving(true);
+    const toSave = [...proposals];
+    let saved = 0;
+    let failed = 0;
+    // Sekvensiell lagring slik at vi får tydelig feedback ved feil og ikke
+    // overbelaster serveren med 20 parallelle embedding-kall.
+    for (const lesson of toSave) {
+      try {
+        await persistProposal(lesson);
+        saved++;
+        setProposals((prev) => prev.filter((p) => p.id !== lesson.id));
+      } catch (err) {
+        failed++;
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${id}`] });
+    queryClient.invalidateQueries({ queryKey: ["/api/lessons"] });
+    setBulkApproving(false);
+    toast({
+      title: failed === 0 ? `${saved} lærdommer lagret` : `${saved} lagret, ${failed} feilet`,
+      description: failed === 0 ? "Alle lærdommer er nå i hjernen din." : "Prøv å godkjenne de gjenstående en og en.",
+      variant: failed === 0 ? "default" : "destructive",
+    });
+  };
 
   const deleteSession = useMutation({
     mutationFn: async () => {
@@ -1123,7 +1153,38 @@ function ExperienceSessionView({ id }: { id: number }) {
             </Button>
           ) : (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Forslag — godkjenn dem du vil lagre</h3>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-sm font-semibold">
+                  {proposals.length} forslag — godkjenn dem du vil lagre
+                </h3>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setProposals([])}
+                    disabled={bulkApproving}
+                  >
+                    Avvis alle
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={approveAll}
+                    disabled={bulkApproving || proposals.length === 0}
+                  >
+                    {bulkApproving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Lagrer…
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Godkjenn alle ({proposals.length})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
               {proposals.map((proposal) => (
                 <ProposalCard
                   key={proposal.id}
