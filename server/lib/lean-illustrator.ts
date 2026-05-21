@@ -9,6 +9,14 @@
  *
  * NB: generate_image bruker ~30 sek. Kall flere bilder i parallell hvis
  * du trenger flere.
+ *
+ * Responsformat (verifisert): generate_image returnerer 3 content-blokker:
+ *  1) text: human-readable melding med "Download the full-quality image: <URL>"
+ *  2) text: JSON-objekt med {download_url, mime_type, size_bytes, suggested_filename}
+ *  3) image: base64-data + mimeType
+ *
+ * Vi laster fra download_url (mest robust og gir høyere kvalitet enn
+ * base64-blokken som er nedskalert).
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -18,12 +26,59 @@ const ILLUSTRATOR_URL =
   process.env.LEAN_ILLUSTRATOR_URL ||
   "https://lean-illustrator-backend.redground-cd4c18c6.norwayeast.azurecontainerapps.io/mcp";
 
+interface ContentBlock {
+  type: string;
+  data?: string;
+  mimeType?: string;
+  text?: string;
+}
+
+function extractDownloadUrl(content: ContentBlock[]): { url: string; mimeType?: string } | null {
+  // Forsøk 1: JSON-blokk med download_url
+  for (const block of content) {
+    if (block.type !== "text" || !block.text) continue;
+    try {
+      const parsed = JSON.parse(block.text);
+      if (typeof parsed?.download_url === "string") {
+        return {
+          url: parsed.download_url,
+          mimeType: typeof parsed.mime_type === "string" ? parsed.mime_type : undefined,
+        };
+      }
+    } catch {
+      // ikke JSON — fortsett
+    }
+  }
+  // Forsøk 2: regex-match på URL i text-blokk
+  for (const block of content) {
+    if (block.type !== "text" || !block.text) continue;
+    const match = block.text.match(/https?:\/\/[^\s)]+\.(?:png|jpe?g|webp)(?:\?[^\s)]*)?/i);
+    if (match) return { url: match[0] };
+  }
+  return null;
+}
+
+function extractInlineImage(content: ContentBlock[]): { buffer: Buffer; mimeType: string } | null {
+  for (const block of content) {
+    if (block.type === "image" && typeof block.data === "string") {
+      return {
+        buffer: Buffer.from(block.data, "base64"),
+        mimeType: block.mimeType || "image/jpeg",
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Generer ett illustrasjonsbilde basert på prompt. Returnerer rå bytes +
  * mimetype klar til å embeddes i PPTX (PptxGenJS aksepterer data-URL).
  *
  * Style er "Byggeplass" som default — passer for taktplanlegging og
  * erfaringsmøter fra bygg-bransjen. "Kontor" er alternativet.
+ *
+ * Kaster ved feil i stedet for å returnere null — kalleren får dermed
+ * synlig loggføring og kan eventuelt fallbacke.
  */
 export async function generateLeanIllustration(args: {
   prompt: string;
@@ -46,52 +101,33 @@ export async function generateLeanIllustration(args: {
       },
     });
 
-    // MCP-svaret kan inneholde flere content-blokker. Vi leter etter første
-    // image-blokk (base64) — tilstrekkelig for embedding i PPTX.
-    const content = (result.content ?? []) as Array<{
-      type: string;
-      data?: string;
-      mimeType?: string;
-      text?: string;
-    }>;
-    const imageBlock = content.find((b) => b.type === "image" && b.data);
-    if (imageBlock?.data) {
-      return {
-        buffer: Buffer.from(imageBlock.data, "base64"),
-        mimeType: imageBlock.mimeType || "image/png",
-      };
+    const content = (result.content ?? []) as ContentBlock[];
+
+    // 1) Prøv download_url først — gir høyere kvalitet enn inline base64
+    const urlMatch = extractDownloadUrl(content);
+    if (urlMatch) {
+      const resp = await fetch(urlMatch.url);
+      if (resp.ok) {
+        const arrayBuf = await resp.arrayBuffer();
+        const headerMime = resp.headers.get("content-type") || urlMatch.mimeType || "image/jpeg";
+        return { buffer: Buffer.from(arrayBuf), mimeType: headerMime.split(";")[0].trim() };
+      }
+      logger.warn({ url: urlMatch.url, status: resp.status }, "Lean illustrator download URL failed");
     }
 
-    // Fallback: tekst-blokk har ofte download_url. Last ned via fetch.
-    const textBlocks = content.filter((b) => b.type === "text" && b.text);
-    for (const tb of textBlocks) {
-      // Forsøk å hente download_url fra en JSON-formatert tekstblokk
-      try {
-        const parsed = JSON.parse(tb.text!);
-        if (typeof parsed?.download_url === "string") {
-          const resp = await fetch(parsed.download_url);
-          if (resp.ok) {
-            const arrayBuf = await resp.arrayBuffer();
-            const contentType = resp.headers.get("content-type") || "image/png";
-            return { buffer: Buffer.from(arrayBuf), mimeType: contentType };
-          }
-        }
-      } catch {
-        // ikke JSON — fortsett
-      }
-      // Rå-URL i tekstblokk?
-      const urlMatch = tb.text!.match(/https?:\/\/\S+\.(?:png|jpg|jpeg|webp)/i);
-      if (urlMatch) {
-        const resp = await fetch(urlMatch[0]);
-        if (resp.ok) {
-          const arrayBuf = await resp.arrayBuffer();
-          const contentType = resp.headers.get("content-type") || "image/png";
-          return { buffer: Buffer.from(arrayBuf), mimeType: contentType };
-        }
-      }
-    }
+    // 2) Fallback: inline image-blokk
+    const inline = extractInlineImage(content);
+    if (inline) return inline;
 
-    throw new Error("Illustrator-svar inneholdt verken bilde-data eller download_url");
+    // 3) Logg responsen for diagnostikk og kast feil
+    const debug = content.map((b) => ({
+      type: b.type,
+      hasData: !!b.data,
+      hasText: !!b.text,
+      textSample: b.text?.slice(0, 100),
+    }));
+    logger.error({ content: debug }, "Lean illustrator returned no usable image content");
+    throw new Error("Illustrator-svar inneholdt ingen brukbart bilde-data");
   } finally {
     try {
       await client.close();
