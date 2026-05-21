@@ -17,6 +17,7 @@ const upload = multer({
 const ALLOWED_UPDATE_FIELDS = [
   "title",
   "seriesId",
+  "topic",
   "elapsedSeconds",
   "transcript",
   "speakerMappings",
@@ -78,6 +79,7 @@ export function registerExperienceRoutes(app: Express) {
       const session = await storage.createExperienceSession(userId, {
         title: req.body.title || null,
         seriesId: req.body.seriesId ?? null,
+        topic: req.body.topic ?? null,
         elapsedSeconds: 0,
         transcript: [],
         speakerMappings: {},
@@ -367,6 +369,7 @@ export function registerExperienceRoutes(app: Express) {
         transcript: session.transcript ?? [],
         userNotes: session.userNotes,
         meetingTitle: session.title,
+        topic: session.topic,
         context: {
           attachments,
           openLessonsInSeries: openLessons,
