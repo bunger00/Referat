@@ -611,7 +611,17 @@ function ExperienceSessionView({ id }: { id: number }) {
     },
     onError: (err: any) => {
       setExtracting(false);
-      toast({ title: "Ekstraksjon feilet", description: err.message, variant: "destructive" });
+      // Server kan svare med rå HTML (Render-timeout 502) — hent ut korte
+      // ord fra meldingen og vis en hjelpsom toast uten å spamme brukeren
+      // med inline HTML.
+      const raw: string = err?.message ?? "";
+      let description = "Server svarte ikke i tide. Prøv igjen om litt.";
+      if (raw.startsWith("502") || raw.includes("<!DOCTYPE") || raw.includes("Bad Gateway")) {
+        description = "Server-timeout. Møtet kan være for langt — prøv igjen, eller del møtet i flere kortere sesjoner.";
+      } else if (raw.length > 0 && raw.length < 200 && !raw.includes("<")) {
+        description = raw;
+      }
+      toast({ title: "Ekstraksjon feilet", description, variant: "destructive" });
     },
   });
 
