@@ -7,6 +7,7 @@ import { extractLessons } from "../lib/lesson-extractor";
 import { ingestText, searchKnowledge } from "../lib/knowledge";
 import { parseUploadedFile, UnsupportedFileTypeError } from "../lib/file-parsers";
 import { trackedChatCompletion } from "../lib/ai-tracker";
+import { buildExperiencePptx } from "../lib/pptx-summary";
 import { z } from "zod";
 
 const upload = multer({
@@ -221,21 +222,26 @@ export function registerExperienceRoutes(app: Express) {
         if (!req.file) return res.status(400).json({ error: "Ingen fil mottatt" });
 
         const { originalname, mimetype, buffer, size } = req.file;
-        const { text } = await parseUploadedFile({
+        const parsed = await parseUploadedFile({
           buffer,
           mimeType: mimetype,
           filename: originalname,
         });
-        if (!text.trim()) {
+        if (!parsed.text.trim()) {
           return res.status(400).json({ error: "Klarte ikke å hente ut tekst fra filen." });
         }
 
+        // For bilder lagrer vi den (HEIC-konverterte) bytene som base64 så
+        // brukeren kan se selve bildet senere — ikke bare AI-tolkningen.
+        const imageData = parsed.imageBuffer ? parsed.imageBuffer.toString("base64") : null;
+        const storedMime = parsed.imageMimeType ?? mimetype;
         const attachment = await storage.createExperienceAttachment(userId, {
           sessionId,
           filename: originalname,
-          mimeType: mimetype,
-          extractedText: text,
+          mimeType: storedMime,
+          extractedText: parsed.text,
           bytes: size,
+          imageData,
         });
 
         // Embed til hjernen (best-effort). sourceName inkluderer møtetittel
@@ -246,9 +252,9 @@ export function registerExperienceRoutes(app: Express) {
             sourceType: "uploaded_doc",
             sourceId: attachment.id,
             sourceName: `${originalname} (fra ${session.title || `møte ${sessionId}`})`,
-            text,
+            text: parsed.text,
             metadata: {
-              mimeType: mimetype,
+              mimeType: storedMime,
               experienceSessionId: sessionId,
               uploadedAt: new Date().toISOString(),
             },
@@ -257,7 +263,11 @@ export function registerExperienceRoutes(app: Express) {
           logger.warn({ err: err.message }, "Attachment ingest failed (non-fatal)");
         }
 
-        res.json({ attachment });
+        // Returner uten den tunge imageData-feltet — klienten henter den
+        // separat via /attachments/:id/image når den faktisk trengs.
+        const { imageData: _unused, ...attachmentLight } = attachment;
+        void _unused;
+        res.json({ attachment: attachmentLight });
       } catch (error: any) {
         if (error instanceof UnsupportedFileTypeError) {
           return res.status(400).json({ error: error.message });
@@ -275,6 +285,28 @@ export function registerExperienceRoutes(app: Express) {
       if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
       const ok = await storage.deleteExperienceAttachment(userId, id);
       res.json({ ok });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Hent rå-bildet for et bilde-vedlegg. Sender base64-dekodet binær med
+   * riktig Content-Type så <img>-tagger kan referere endepunktet direkte
+   * (med Authorization-header via authFetch + blob URL i frontend).
+   * Returnerer 404 om vedlegget ikke er et bilde / ikke har lagrede bytes.
+   */
+  app.get("/api/experience/attachments/:id/image", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
+      const att = await storage.getExperienceAttachment(userId, id);
+      if (!att || !att.imageData) return res.status(404).json({ error: "Bilde ikke funnet" });
+      const buf = Buffer.from(att.imageData, "base64");
+      res.setHeader("Content-Type", att.mimeType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.send(buf);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -319,21 +351,24 @@ export function registerExperienceRoutes(app: Express) {
       if (!req.file) return res.status(400).json({ error: "Ingen fil mottatt" });
 
       const { originalname, mimetype, buffer, size } = req.file;
-      const { text } = await parseUploadedFile({
+      const parsed = await parseUploadedFile({
         buffer,
         mimeType: mimetype,
         filename: originalname,
       });
-      if (!text.trim()) {
+      if (!parsed.text.trim()) {
         return res.status(400).json({ error: "Klarte ikke å hente ut tekst fra filen." });
       }
 
+      const imageData = parsed.imageBuffer ? parsed.imageBuffer.toString("base64") : null;
+      const storedMime = parsed.imageMimeType ?? mimetype;
       const attachment = await storage.createExperienceAttachment(tokenRow.userId, {
         sessionId: tokenRow.sessionId,
         filename: originalname,
-        mimeType: mimetype,
-        extractedText: text,
+        mimeType: storedMime,
+        extractedText: parsed.text,
         bytes: size,
+        imageData,
       });
 
       // Best-effort: embed til hjernen
@@ -343,9 +378,9 @@ export function registerExperienceRoutes(app: Express) {
           sourceType: "uploaded_doc",
           sourceId: attachment.id,
           sourceName: `${originalname} (fra ${session.title || `møte ${session.id}`})`,
-          text,
+          text: parsed.text,
           metadata: {
-            mimeType: mimetype,
+            mimeType: storedMime,
             experienceSessionId: session.id,
             uploadedAt: new Date().toISOString(),
             viaMobileToken: true,
@@ -516,6 +551,42 @@ export function registerExperienceRoutes(app: Express) {
       } });
     } catch (error: any) {
       logger.error({ err: error.message }, "Lesson extraction failed");
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * Eksporter en én-sides PowerPoint-oppsummering av sesjonen med Lean
+   * Communications-merkevarestiling og AI-genererte illustrasjoner fra
+   * Lean Image Generator. Synchront: AI-summary tar 10-30s, hver
+   * illustrasjon ~30s — totalt 60-90 sek for typisk respons.
+   */
+  app.post("/api/experience/sessions/:id/export-pptx", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Ugyldig ID" });
+      const session = await storage.getExperienceSession(userId, id);
+      if (!session) return res.status(404).json({ error: "Ikke funnet" });
+
+      const lessons = await storage.getLessonsForSession(userId, id);
+      const { buffer, filename } = await buildExperiencePptx({
+        userId,
+        transcript: session.transcript ?? [],
+        lessons,
+        meetingTitle: session.title,
+        topic: session.topic,
+        startedAt: session.startedAt,
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      logger.error({ err: error.message }, "PPTX export failed");
       res.status(500).json({ error: error.message });
     }
   });

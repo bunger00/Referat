@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, authFetch } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { usePcmRecorder } from "@/hooks/usePcmRecorder";
 import { useScreenCapture } from "@/hooks/use-screen-capture";
@@ -1206,25 +1206,28 @@ function ExperienceSessionView({ id }: { id: number }) {
           )}
 
           {proposals.length === 0 ? (
-            <Button
-              onClick={() => {
-                setExtracting(true);
-                extractMutation.mutate();
-              }}
-              disabled={extracting}
-            >
-              {extracting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  AI leser gjennom møtet…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  {lessons.length > 0 ? "Ekstraher flere lærdommer" : "Ekstraher lærdommer"}
-                </>
-              )}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => {
+                  setExtracting(true);
+                  extractMutation.mutate();
+                }}
+                disabled={extracting}
+              >
+                {extracting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    AI leser gjennom møtet…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    {lessons.length > 0 ? "Ekstraher flere lærdommer" : "Ekstraher lærdommer"}
+                  </>
+                )}
+              </Button>
+              <PptxExportButton sessionId={id} />
+            </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1361,6 +1364,64 @@ function ProposalCard({
   );
 }
 
+function PptxExportButton({ sessionId }: { sessionId: number }) {
+  const { toast } = useToast();
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const resp = await authFetch(`/api/experience/sessions/${sessionId}/export-pptx`, {
+        method: "POST",
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text.trimStart().startsWith("<") ? "Eksporten brukte for lang tid. Prøv igjen." : text);
+      }
+      // Filnavn fra Content-Disposition, ellers fallback
+      const disp = resp.headers.get("Content-Disposition") || "";
+      const match = disp.match(/filename="?([^";]+)"?/i);
+      const filename = match ? decodeURIComponent(match[1]) : "erfaringsmote.pptx";
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "PowerPoint klar", description: filename });
+    } catch (err: any) {
+      toast({ title: "Eksport feilet", description: err.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      onClick={handleExport}
+      disabled={exporting}
+      title="Generer en én-sides PowerPoint-oppsummering med Lean-illustrasjoner. Tar ca. 60-90 sek."
+    >
+      {exporting ? (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          Lager PowerPoint…
+        </>
+      ) : (
+        <>
+          <FileText className="h-4 w-4 mr-2" />
+          Eksporter til PowerPoint
+        </>
+      )}
+    </Button>
+  );
+}
+
 function AttachmentUploadButton({ sessionId }: { sessionId: number }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -1426,6 +1487,8 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1445,6 +1508,34 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
   const preview = attachment.extractedText.slice(0, 140);
   const isImage = attachment.mimeType?.startsWith("image/");
 
+  // Last bildet via authFetch (krever Bearer-token) og bygg en blob URL som
+  // <img> kan rendre. Bare når detalj-dialogen faktisk åpnes — vi vil ikke
+  // hente flere MB binær for hvert vedlegg i listen.
+  useEffect(() => {
+    if (!showDetails || !isImage) return;
+    let revoked = false;
+    let blobUrl: string | null = null;
+    setImageLoading(true);
+    (async () => {
+      try {
+        const resp = await authFetch(`/api/experience/attachments/${attachment.id}/image`);
+        if (!resp.ok) return;
+        const blob = await resp.blob();
+        blobUrl = URL.createObjectURL(blob);
+        if (!revoked) setImageUrl(blobUrl);
+      } catch {
+        // ignore — viser bare tekstdelen
+      } finally {
+        setImageLoading(false);
+      }
+    })();
+    return () => {
+      revoked = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      setImageUrl(null);
+    };
+  }, [showDetails, isImage, attachment.id]);
+
   return (
     <>
       <Card
@@ -1458,9 +1549,13 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
             setShowDetails(true);
           }
         }}
-        title="Klikk for å se hele tolkningen"
+        title={isImage ? "Klikk for å se bildet og AI-tolkningen" : "Klikk for å se hele tolkningen"}
       >
-        <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+        {isImage ? (
+          <Camera className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+        ) : (
+          <FileText className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+        )}
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm truncate">{attachment.filename}</div>
           <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{preview}…</div>
@@ -1477,19 +1572,37 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
         </Button>
       </Card>
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="truncate pr-8">{attachment.filename}</DialogTitle>
           </DialogHeader>
           <div className="text-xs text-muted-foreground -mt-1">
-            {isImage ? "AI-tolkning av bildet" : "Uthentet tekst fra dokumentet"}
+            {isImage ? "Bilde + AI-tolkning" : "Uthentet tekst fra dokumentet"}
             {" · "}
             {attachment.extractedText.length.toLocaleString("nb-NO")} tegn
           </div>
-          <div className="flex-1 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed bg-muted/40 rounded-md p-4 border">
-            {attachment.extractedText || "(ingen tekst)"}
+          <div className="flex-1 overflow-y-auto space-y-3">
+            {isImage && (
+              <div className="rounded-md border bg-muted/40 p-2 flex items-center justify-center min-h-[200px]">
+                {imageLoading && !imageUrl ? (
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                ) : imageUrl ? (
+                  <img src={imageUrl} alt={attachment.filename} className="max-h-[50vh] max-w-full object-contain rounded" />
+                ) : (
+                  <span className="text-xs text-muted-foreground">Bildet er ikke lagret for dette vedlegget.</span>
+                )}
+              </div>
+            )}
+            <div className="whitespace-pre-wrap text-sm leading-relaxed bg-muted/40 rounded-md p-4 border">
+              {attachment.extractedText || "(ingen tekst)"}
+            </div>
           </div>
           <DialogFooter>
+            {imageUrl && (
+              <Button variant="ghost" asChild>
+                <a href={imageUrl} download={attachment.filename}>Last ned bilde</a>
+              </Button>
+            )}
             <Button variant="ghost" onClick={() => setShowDetails(false)}>Lukk</Button>
           </DialogFooter>
         </DialogContent>
