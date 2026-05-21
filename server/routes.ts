@@ -7,6 +7,7 @@ import { z } from "zod";
 import { requireAuth, getUserId } from "./auth";
 import { analyzeRequestSchema, transcribeRequestSchema, summaryRequestSchema, transcriptSegmentSchema, interviewCriterionLabels, type ExpertRole, type ExtractedRule, type Warning, type MeetingDocument, type TranscriptSegment, type InterviewScores, type StarStatus, type InterviewEvalSnapshot, type InterviewReport } from "@shared/schema";
 import { tryRepairTruncatedJson } from "./lib/json-repair";
+import { cleanupSegments } from "./lib/transcript-cleanup";
 import { mergeDecisions } from "./lib/merge-decisions";
 import { registerInterviewRoutes } from "./routes/interview";
 import { registerExperienceRoutes } from "./routes/experience";
@@ -177,7 +178,7 @@ async function transcribeWithNbWhisperRaw(audioBuffer: Buffer, model: "medium" |
   return result as HfTranscriptionResult;
 }
 
-async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "audio/webm", prompt?: string): Promise<HfTranscriptionResult> {
+async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "audio/webm", prompt?: string, language: "no" | "en" | "auto" = "no"): Promise<HfTranscriptionResult> {
   // Whisper detects format from the file's magic bytes regardless of the
   // filename, but matching the extension to the actual mime keeps logs sane
   // and avoids edge-case rejections.
@@ -190,7 +191,10 @@ async function transcribeWithOpenAI(audioBuffer: Buffer, mimeType: string = "aud
   const result = await openai.audio.transcriptions.create({
     file,
     model: "whisper-1",
-    language: "no",
+    // Sett kun `language` hvis brukeren har valgt eksplisitt språk. "auto"
+    // utelater feltet slik at Whisper detekterer selv — viktig for blandede
+    // eller engelske møter der "no"-låsing produserer garbled output.
+    ...(language === "auto" ? {} : { language }),
     response_format: "verbose_json",
     timestamp_granularities: ["segment"],
     // Domene-hint biaser modellen mot rett vokabular. Whisper er hardcoded
@@ -257,12 +261,12 @@ function hasTranscriptionContent(result: HfTranscriptionResult): boolean {
   return hasText || hasChunks;
 }
 
-async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium", mimeType?: string, prompt?: string): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
+async function transcribeAudio(audioBuffer: Buffer, model: "medium" | "large" | "openai" = "medium", mimeType?: string, prompt?: string, language: "no" | "en" | "auto" = "no"): Promise<HfTranscriptionResult & { engine?: string; status?: string }> {
   // OpenAI is only used when the user explicitly picks it. nb-whisper-* will
   // never silently fall back — failures bubble up so the UI can show what's
   // wrong (e.g. paused endpoint).
   if (model === "openai") {
-    const result = await transcribeWithOpenAI(audioBuffer, mimeType, prompt);
+    const result = await transcribeWithOpenAI(audioBuffer, mimeType, prompt, language);
     return { ...result, engine: "openai-whisper" };
   }
 
@@ -520,7 +524,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Ugyldig forespørsel", details: parsed.error.issues });
       }
       
-      const { audio, model, mimeType, prompt } = parsed.data;
+      const { audio, model, mimeType, prompt, language, cleanup } = parsed.data;
 
       if (!audio || audio.length === 0) {
         return res.json({ segments: [] });
@@ -535,7 +539,7 @@ export async function registerRoutes(
       }
 
       // Transcribe with selected model (default: medium)
-      const transcription = await transcribeAudio(audioBuffer, model ?? "medium", mimeType, prompt);
+      const transcription = await transcribeAudio(audioBuffer, model ?? "medium", mimeType, prompt, language);
       
       // Process the transcription into segments with speaker labels
       const segments = [];
@@ -627,10 +631,23 @@ export async function registerRoutes(
         }
       }
       
+      // Valgfri AI-renskriving: fikser åpenbare feiltranskripsjoner basert
+      // på topic og oversetter til targetLanguage. Best-effort — ved feil
+      // returnerer vi de ufillede segmentene.
+      let finalSegments = segments;
+      if (cleanup && segments.length > 0) {
+        try {
+          finalSegments = await cleanupSegments(segments, cleanup, userId);
+        } catch (err: any) {
+          logger.warn({ err: err?.message }, "Transcript cleanup failed (returning raw)");
+        }
+      }
+
       res.json({
-        segments,
+        segments: finalSegments,
         engine: (transcription as any).engine || "openai-whisper",
         status: (transcription as any).status,
+        cleanedUp: !!cleanup && finalSegments !== segments,
       });
 
     } catch (error: any) {

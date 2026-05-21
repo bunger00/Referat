@@ -713,17 +713,39 @@ function ExperienceSessionView({ id }: { id: number }) {
           reader.readAsDataURL(wavBlob);
         });
 
-        // Bygg whisper-prompt fra tema + serie-beskrivelse slik at fagord
-        // (f.eks. "taktplanlegging", "siste-planner") biases inn i transkripsjonen.
-        const promptParts = [session?.topic, currentSeries?.description]
-          .filter((s): s is string => !!s?.trim());
-        const transcriptionPrompt = promptParts.length > 0 ? promptParts.join(". ") : undefined;
+        // Bygg smartere Whisper-prompt: tema + serie + vedlegg-titler + de
+        // siste 2 transkript-segmentene. Whisper har 224-token grense, så vi
+        // bygger en kompakt streng og truncerer.
+        const recent = liveTranscriptRef.current
+          .slice(-2)
+          .map((s) => s.text)
+          .filter(Boolean)
+          .join(" ");
+        const promptParts = [
+          session?.topic,
+          currentSeries?.description,
+          attachments.map((a) => a.filename.replace(/\.[^.]+$/, "")).join(", "),
+          recent,
+        ].filter((s): s is string => !!s?.trim());
+        // ~200 tegn lim opp til 224-token grensen (~4 chars/token)
+        const transcriptionPrompt = promptParts.length > 0
+          ? promptParts.join(". ").slice(0, 800)
+          : undefined;
+
+        const lang = (session?.language as "no" | "en" | "auto") ?? "no";
 
         const resp = await apiRequest("POST", "/api/transcribe", {
           audio: base64,
           model: "openai",
           mimeType: "audio/wav",
+          language: lang,
           ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
+          // AI-renskriving: fiks fagord, oversett ved behov, dropp hallusinasjoner.
+          // Output-språk er alltid norsk for konsistens i transkriptet.
+          cleanup: {
+            topic: session?.topic ?? undefined,
+            targetLanguage: "no",
+          },
         });
         const { segments: newSegments }: { segments: TranscriptSegment[] } = await resp.json();
         if (!newSegments?.length) return;
@@ -757,7 +779,7 @@ function ExperienceSessionView({ id }: { id: number }) {
         console.error("Chunk-feil:", err);
       }
     },
-    [captureAndDescribe, persistTranscript, wordCorrections, session?.topic, currentSeries?.description],
+    [captureAndDescribe, persistTranscript, wordCorrections, session?.topic, session?.language, currentSeries?.description, attachments],
   );
 
   const recorder = usePcmRecorder({ onChunk: handleChunk });
@@ -869,7 +891,12 @@ function ExperienceSessionView({ id }: { id: number }) {
         </div>
       )}
 
-      <TopicField sessionId={id} initialTopic={session.topic} seriesDescription={currentSeries?.description} />
+      <TopicField
+        sessionId={id}
+        initialTopic={session.topic}
+        initialLanguage={session.language as "no" | "en" | "auto"}
+        seriesDescription={currentSeries?.description}
+      />
 
 
       {openSeriesLessons.length > 0 && (
@@ -1331,28 +1358,40 @@ function AttachmentCard({ attachment, sessionId }: { attachment: ExperienceAttac
 function TopicField({
   sessionId,
   initialTopic,
+  initialLanguage,
   seriesDescription,
 }: {
   sessionId: number;
   initialTopic: string | null;
+  initialLanguage: "no" | "en" | "auto";
   seriesDescription?: string | null;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [topic, setTopic] = useState(initialTopic ?? "");
+  const [language, setLanguage] = useState<"no" | "en" | "auto">(initialLanguage ?? "no");
   const [saving, setSaving] = useState(false);
-  const lastSavedRef = useRef(initialTopic ?? "");
+  const lastSavedRef = useRef({ topic: initialTopic ?? "", language: initialLanguage ?? "no" });
 
-  const save = async () => {
-    const trimmed = topic.trim();
-    if (trimmed === lastSavedRef.current) return;
+  const save = async (next?: { topic?: string; language?: "no" | "en" | "auto" }) => {
+    const trimmedTopic = (next?.topic ?? topic).trim();
+    const lang = next?.language ?? language;
+    if (
+      trimmedTopic === lastSavedRef.current.topic &&
+      lang === lastSavedRef.current.language
+    ) {
+      return;
+    }
     setSaving(true);
     try {
-      await apiRequest("PATCH", `/api/experience/sessions/${sessionId}`, { topic: trimmed || null });
-      lastSavedRef.current = trimmed;
+      await apiRequest("PATCH", `/api/experience/sessions/${sessionId}`, {
+        topic: trimmedTopic || null,
+        language: lang,
+      });
+      lastSavedRef.current = { topic: trimmedTopic, language: lang };
       queryClient.invalidateQueries({ queryKey: [`/api/experience/sessions/${sessionId}`] });
     } catch (err: any) {
-      toast({ title: "Kunne ikke lagre tema", description: err.message, variant: "destructive" });
+      toast({ title: "Kunne ikke lagre", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -1366,16 +1405,35 @@ function TopicField({
         </Label>
         {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
       </div>
-      <Input
-        id="topic-input"
-        value={topic}
-        onChange={(e) => setTopic(e.target.value)}
-        onBlur={save}
-        placeholder={seriesDescription || "f.eks. taktplanlegging i bygg, lean construction, agile retrospektiv"}
-        className="text-base"
-      />
+      <div className="flex gap-2 items-stretch">
+        <Input
+          id="topic-input"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          onBlur={() => save()}
+          placeholder={seriesDescription || "f.eks. taktplanlegging i bygg, lean construction, agile retrospektiv"}
+          className="text-base flex-1"
+        />
+        <Select
+          value={language}
+          onValueChange={(v) => {
+            const next = v as "no" | "en" | "auto";
+            setLanguage(next);
+            void save({ language: next });
+          }}
+        >
+          <SelectTrigger className="w-[140px] shrink-0" aria-label="Lyd-språk">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="no">Norsk</SelectItem>
+            <SelectItem value="en">Engelsk</SelectItem>
+            <SelectItem value="auto">Auto-detekt</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <p className="text-xs text-muted-foreground mt-1.5">
-        AI bruker dette til å bias transkripsjonen mot rett vokabular og tilpasse lærdoms-formuleringer til ditt fagområde.
+        AI bruker temaet som vokabular-hint og som kontekst i lærdom-ekstraksjonen. Velg lyd-språk slik at Whisper ikke prøver å gjette feil — er møtet på engelsk, sett «Engelsk» (vi oversetter til norsk i renskrivingen).
       </p>
     </div>
   );
