@@ -60,7 +60,27 @@ export async function parseXlsxBuffer(buf: Buffer): Promise<string> {
 }
 
 export async function describeImageWithVision(buf: Buffer, mimeType: string): Promise<string> {
-  const base64 = buf.toString("base64");
+  // OpenAI vision aksepterer PNG/JPEG/WEBP/GIF, men IKKE HEIC (Apple-format
+  // som iPhones tar bilder i). Konverter HEIC til JPEG først.
+  let processedBuf = buf;
+  let processedMime = mimeType;
+  if (mimeType === "image/heic" || mimeType === "image/heif") {
+    try {
+      // @ts-ignore — heic-convert har ikke offisielle @types-pakke
+      const heicConvert = (await import("heic-convert")).default;
+      const out = await heicConvert({
+        buffer: buf as any,
+        format: "JPEG",
+        quality: 0.85,
+      });
+      processedBuf = Buffer.from(out);
+      processedMime = "image/jpeg";
+    } catch (err: any) {
+      throw new Error(`Kunne ikke konvertere HEIC-bildet: ${err?.message ?? err}`);
+    }
+  }
+
+  const base64 = processedBuf.toString("base64");
   const resp = await openai.chat.completions.create({
     model: "gpt-5",
     messages: [
@@ -73,7 +93,7 @@ export async function describeImageWithVision(buf: Buffer, mimeType: string): Pr
         role: "user",
         content: [
           { type: "text", text: "Beskriv dette bildet med fokus på kunnskapsverdi:" },
-          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+          { type: "image_url", image_url: { url: `data:${processedMime};base64,${base64}` } },
         ] as any,
       },
     ],
@@ -121,8 +141,13 @@ export async function parseUploadedFile(args: {
   ) {
     return { text: await parseXlsxBuffer(buffer), sourceTypeHint: "uploaded_doc" };
   }
-  if (mimeType.startsWith("image/")) {
-    return { text: await describeImageWithVision(buffer, mimeType), sourceTypeHint: "uploaded_image" };
+  if (mimeType.startsWith("image/") || lower.endsWith(".heic") || lower.endsWith(".heif")) {
+    // Noen browsere/OS sender HEIC med tom mimetype — utled fra filendelse.
+    const effectiveMime =
+      mimeType.startsWith("image/") ? mimeType :
+      lower.endsWith(".heic") ? "image/heic" :
+      "image/heif";
+    return { text: await describeImageWithVision(buffer, effectiveMime), sourceTypeHint: "uploaded_image" };
   }
   if (mimeType === "text/plain" || lower.endsWith(".txt")) {
     return { text: buffer.toString("utf-8"), sourceTypeHint: "uploaded_doc" };
