@@ -64,13 +64,32 @@ du sannsynligvis vært for konservativ — skan en gang til.
 - Vedlagte dokumenter → siter eller referer hvis relevant
 - Tidligere kunnskap fra hjernen → koble til etablerte mønstre
 
+## Dedupliser hardt
+
+Hvis brukeren har kjørt extract før, vil du se en "ALLEREDE LAGRET FRA
+DENNE SESJONEN"-seksjon. Disse lærdommene er FERDIG-BEHANDLET — IKKE
+foreslå nye varianter av dem. Det inkluderer:
+
+- Samme tema med litt annen tittel ("Aktiv eierstyring" vs "Unngå
+  over-delegering fra byggherre" — det er SAMME lærdom, ikke to)
+- Synonym-omskriving av samme prinsipp
+- Smal vs bred variant av samme observasjon
+- Splitt av én lærdom i flere narrative bits
+
+Test før du foreslår: "Dekker noen av de allerede lagrede lærdommene
+i hovedsak dette poenget?" Hvis JA → ikke foreslå, eller marker med
+relatesToLessonId hvis du har en TYDELIG NY VINKEL som utdyper det
+eksisterende uten å gjenta.
+
+Andre kjøring av extract bør typisk gi 0-2 nye forslag, ikke 10. Hvis
+du foreslår mange på andre kjøring, har du sannsynligvis ikke
+deduplisert grundig nok.
+
 ## Ikke inkluder
 
 - Aksjoner eller "TODO"-er (egen modul)
 - Beslutninger som krever vedtak (egen modul)
 - Småprat uten lærings-verdi
-- Lærdommer som er bit-for-bit identiske med eksisterende åpne lærdommer
-  (markér som relatesToLessonId i stedet)
 
 ## Språk
 
@@ -106,6 +125,10 @@ export interface ExtractionContext {
   // Åpne/in_progress lærdommer fra forrige sesjoner i samme serie. AI kan
   // identifisere disse som "oppfølginger" og markere relatesToLessonId.
   openLessonsInSeries?: LessonLearned[];
+  // Lærdommer som ALLEREDE er lagret fra denne sesjonen (typisk via en
+  // tidligere kjøring av extract). AI får disse for å unngå duplikat-
+  // forslag på etterfølgende kjøringer.
+  alreadySavedFromThisSession?: LessonLearned[];
   // Verifisert tidligere kunnskap (RAG-treff fra hjernen) som er relevant for
   // dette møtet. Inkluderer både gamle lærdommer og dokumenter.
   priorKnowledge?: Array<{ sourceName: string; content: string }>;
@@ -131,6 +154,14 @@ function formatOpenLessons(items?: LessonLearned[]): string {
     return `[id ${l.id}, ${l.status}] ${l.title}\n  Problem: ${l.problem}\n  Løsning: ${l.solution}`;
   });
   return `\n\nTIDLIGERE LÆRDOMMER fra samme prosjekt/serie (åpne eller under utprøving):\n${blocks.join("\n\n")}`;
+}
+
+function formatAlreadySaved(items?: LessonLearned[]): string {
+  if (!items?.length) return "";
+  const blocks = items.map((l) => {
+    return `[id ${l.id}] ${l.title}\n  Problem: ${l.problem}\n  Løsning: ${l.solution}`;
+  });
+  return `\n\n⚠️ ALLEREDE LAGRET FRA DENNE SESJONEN — IKKE DUPLISER:\n${blocks.join("\n\n")}\n\nIKKE foreslå lærdommer som dekker samme poeng som disse, selv om du formulerer dem annerledes. Hvis du har en VESENTLIG ny vinkling på et eksisterende tema, marker den med relatesToLessonId pekende på id over. Hvis ikke, hopp over.`;
 }
 
 function formatPriorKnowledge(items?: Array<{ sourceName: string; content: string }>): string {
@@ -179,6 +210,7 @@ export async function extractLessons(args: {
     seriesHeader,
     meetingTitle ? `Møtetittel: ${meetingTitle}` : null,
     userNotes?.trim() ? `Brukerens egne notater:\n${userNotes.trim()}` : null,
+    formatAlreadySaved(context?.alreadySavedFromThisSession),
     formatOpenLessons(context?.openLessonsInSeries),
     formatPriorKnowledge(context?.priorKnowledge),
     formatAttachments(context?.attachments),

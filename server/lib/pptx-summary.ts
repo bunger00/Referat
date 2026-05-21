@@ -45,35 +45,51 @@ const summarySchema = z.object({
 
 type SummaryStructure = z.infer<typeof summarySchema>;
 
-const SYSTEM_PROMPT = `Du analyserer et erfaringsmøte og produserer en strukturert
-JSON-oppsummering som rendres som en flersides PowerPoint med Lean
-Communications-merkevaren. Skriv ALT på norsk (bokmål).
+const SYSTEM_PROMPT = `Du produserer en JSON-strukturert PowerPoint-oppsummering av et
+erfaringsmøte med Lean Communications-merkevaren. Skriv ALT på norsk
+(bokmål).
 
-Output-felter:
+## VIKTIG: Bruk LAGREDE LÆRDOMMER som autoritativ kilde
+
+Hvis brukerinputen inneholder LAGREDE LÆRDOMMER, er disse brukerens
+ferdig-kurerte liste. Bygg takeaways og detailedLessons FRA disse
+lærdommene — IKKE gjenoppfinn nye fra transkriptet.
+
+- Velg de mest representative og handlingsorienterte (3-8 totalt for
+  takeaways, 3-5 for detailedLessons)
+- Bruk lærdommenes egne title/solution som utgangspunkt
+- Ikke parafraser unødig — brukeren har allerede godkjent formuleringen
+- Hvis det er flere enn 8 lagrede lærdommer, prioriter de mest
+  fundamentale og dekkende, og kombinér beslektede
+
+Hvis det IKKE finnes lagrede lærdommer, generer fra transkriptet selv.
+
+## Felter
+
 - title: Kort overskrift, max 50 tegn (vil bli ALL CAPS).
 - eyebrow: Liten label, max 50 tegn (vil bli ALL CAPS). Format:
   "ERFARINGSMØTE · 21. MAI 2026" eller "TAKTPLANLEGGING · LEAN CONSTRUCTION".
 - summary: 3-5 setninger som FYLLER sammendragsslidet, 400-700 tegn.
-  Forklar hva møtet handlet om, hvilke spørsmål dere jobbet med og hva
-  konklusjonen er. Direkte, vi/dere-form. IKKE bare én setning.
-- takeaways: 3-8 korte bullets (max 180 tegn hver) til lista-slidet i
-  5-side-layouten. Konkret, ikke gjenta hverandre.
+  Forklar hva møtet handlet om, hvilke spørsmål dere jobbet med, og
+  hva hovedinnsikten er. Direkte, vi/dere-form.
+- takeaways: 3-8 korte bullets (max 180 tegn hver) for lista-slidet.
+  Hvis lagrede lærdommer finnes, hent fra dem.
 - detailedLessons: 3-5 utdypede lærdommer for 8-side-layouten — én per
-  slide. Hver har title (max 60 tegn, blir ALL CAPS) og body (200-700
-  tegn). Bodyen skal HA INNHOLD: hva er problemet, hvorfor er det
-  viktig, hva er løsningen, hvilken endring må vi gjøre i praksis. Ikke
-  bare en setning. Flyt som tett prosa, ikke punktliste.
+  slide. Hver har title (max 60 tegn, blir ALL CAPS) og body (300-700
+  tegn). Hvis lagrede lærdommer finnes: bruk title fra lærdommen og bygg
+  body fra problem + løsning som tett prosa med konkret kontekst og
+  praktisk anvendelse. IKKE bare én setning — bodyen skal fylle en slide.
 - nextStep: 2-3 setninger (80-280 tegn) om konkrete neste skritt.
-  Ikke bare "Implementer det vi har lært" — vær konkret om hva, hvem,
-  når. Skal stå alene på en mørkblå closing slide.
+  Vær konkret om hva, hvem, når. Skal stå alene på mørkblå closing
+  slide. UNNGÅ klisjéer som "implementer det vi har lært" — vær spesifikk.
 - imagePrompts: 4-6 prompts for AI-illustrator i Byggeplass-stil
   (norske bygg-arbeidere med vernehjelm, gul vest, hørselsvern).
-  Hver prompt skal beskrive en KONKRET SCENE — ikke abstrakt. Eksempler:
+  KONKRET SCENE — ikke abstrakt. Eksempler:
   * "To bygg-arbeidere studerer en takt-tavle med kolonner for uke 10-13
     og post-it-lapper i grønt og hvitt. En peker, en holder tegninger."
   * "Tre bygg-arbeidere i diskusjon foran en byggeplass-modell der noen
     arbeidspakker er markert med rød tape som forsinkelser."
-  Varier scenene — ikke gjentakelser av samme oppsett.
+  Varier scenene.
 
 Output: KUN gyldig JSON, ingen markdown-fences, ingen kommentarer.`;
 
@@ -249,19 +265,76 @@ function addTitleSlide(pptx: PptxGenJS, structure: SummaryStructure, slideNum: n
 function addClosingSlide(pptx: PptxGenJS, structure: SummaryStructure, slideNum: number, total: number, dateLabel: string | null) {
   const slide = pptx.addSlide();
   slide.background = { color: brand.colors.darkBlue };
-  addEyebrow(slide, "Neste skritt", 2.5, brand.colors.green);
-  slide.addText(structure.nextStep, {
-    x: MARGIN_X, y: 2.95, w: SLIDE_W - 2 * MARGIN_X - 3, h: 3.0,
+
+  // Negativ logo øverst til høyre, samme som tittelslidet
+  slide.addImage({
+    path: logoPath("negativ"),
+    x: SLIDE_W - 2.6, y: 0.5, w: 1.9, h: 0.65,
+    sizing: { type: "contain", w: 1.9, h: 0.65 },
+  });
+
+  // Topp-stiplet linje (LEAN-signaturen)
+  addDashedSignature(slide, 1.95, brand.colors.green);
+
+  // Eyebrow + stor takk-tittel — gir slidet en tydeligere visuell tyngde
+  addEyebrow(slide, "Avslutning", 2.4, brand.colors.green);
+
+  slide.addText("TUSEN TAKK.", {
+    x: MARGIN_X, y: 2.8, w: SLIDE_W - 2 * MARGIN_X, h: 1.4,
     fontFace: brand.fonts.display,
-    fontSize: 36,
+    fontSize: 72,
     bold: true,
     color: brand.colors.paper,
-    charSpacing: -1,
-    lineSpacing: 44,
+    charSpacing: -2,
     valign: "top",
   });
-  addDashedSignature(slide, 6.1, brand.colors.green);
-  addLargeLogo(slide);
+
+  // Hårstrek under tittelen
+  slide.addShape("line", {
+    x: MARGIN_X, y: 4.4, w: SLIDE_W - 2 * MARGIN_X, h: 0,
+    line: { color: brand.colors.green, width: 1 },
+  });
+
+  // Eyebrow + neste-skritt-tekst i 2-kolonne under
+  slide.addText("NESTE SKRITT", {
+    x: MARGIN_X, y: 4.7, w: 4, h: 0.3,
+    fontFace: brand.fonts.display,
+    fontSize: brand.sizes.eyebrow + 1,
+    bold: true,
+    color: brand.colors.green,
+    charSpacing: 4,
+  });
+
+  slide.addText(structure.nextStep, {
+    x: MARGIN_X, y: 5.05, w: 7.5, h: 1.9,
+    fontFace: brand.fonts.body,
+    fontSize: 16,
+    color: brand.colors.paper,
+    lineSpacing: 24,
+    valign: "top",
+  });
+
+  // Høyre kolonne: kontakt-blokk i grønn per brand-guide for closing slides
+  slide.addText("LEAN COMMUNICATIONS", {
+    x: SLIDE_W - 4.5, y: 4.7, w: 4, h: 0.3,
+    fontFace: brand.fonts.display,
+    fontSize: brand.sizes.eyebrow + 1,
+    bold: true,
+    color: brand.colors.green,
+    charSpacing: 4,
+    align: "right",
+  });
+  slide.addText("leancommunications.no", {
+    x: SLIDE_W - 4.5, y: 5.05, w: 4, h: 0.35,
+    fontFace: brand.fonts.display,
+    fontSize: 18,
+    color: brand.colors.green,
+    align: "right",
+  });
+
+  // Bunn-stiplet linje
+  addDashedSignature(slide, 6.85, brand.colors.green);
+
   addFooter(slide, slideNum, total, dateLabel, true);
 }
 
@@ -418,10 +491,21 @@ function buildContentSpecs(structure: SummaryStructure, slideCount: SlideCount):
 /**
  * Bygg PPTX. Returnerer Buffer + foreslått filnavn.
  */
+export interface UserImage {
+  filename: string;
+  mimeType: string;
+  buffer: Buffer;
+  extractedText: string;
+}
+
 export async function buildExperiencePptx(args: {
   userId: string;
   transcript: TranscriptSegment[];
   lessons: LessonLearned[];
+  // Brukerens egne opplastede bilder fra møtet (kamera, QR, fil). Brukes
+  // som primære visualer på innholdsslidene — AI-illustrasjoner brukes bare
+  // hvis vi har for få brukerbilder til å dekke layout-en.
+  userImages?: UserImage[];
   meetingTitle?: string | null;
   topic?: string | null;
   startedAt?: Date | null;
@@ -432,24 +516,34 @@ export async function buildExperiencePptx(args: {
   const imageFrequency: ImageFrequency = args.imageFrequency ?? "every";
 
   const structure = await generateStructuredSummary(args);
+  const userImages = args.userImages ?? [];
 
   // Først bygg layout-spesifikasjoner så vi vet hvor mange bilder vi
-  // faktisk trenger — så slipper vi å fyre av MCP-kall for slides som
-  // ikke skal ha bilde uansett.
+  // faktisk trenger.
   const contentSpecs = buildContentSpecs(structure, slideCount);
   const slidesWithImageFlags = contentSpecs.map((_, idx) =>
     imageFrequency === "every" ? true : idx % 2 === 0,
   );
-  const imagesNeeded = slidesWithImageFlags.filter(Boolean).length;
-  const prompts = structure.imagePrompts.slice(0, imagesNeeded);
+  const slotsNeeded = slidesWithImageFlags.filter(Boolean).length;
+
+  // Prioritert bilde-strategi:
+  //   1) Brukerens egne opplastede bilder (kamera/QR/fil) — primær,
+  //      siden de viser det faktiske møte-innholdet
+  //   2) AI-genererte Byggeplass-illustrasjoner — fyller resterende slots
+  //   3) Ingen bilde — body-tekst får full bredde
+  const userImageCount = Math.min(userImages.length, slotsNeeded);
+  const aiPromptsNeeded = Math.max(0, slotsNeeded - userImageCount);
+  const prompts = structure.imagePrompts.slice(0, aiPromptsNeeded);
 
   logger.info(
-    { slideCount, imageFrequency, contentSlides: contentSpecs.length, imagesNeeded, promptsAvailable: structure.imagePrompts.length },
+    {
+      slideCount, imageFrequency,
+      contentSlides: contentSpecs.length, slotsNeeded,
+      userImageCount, aiPromptsNeeded,
+    },
     "PPTX layout planned",
   );
 
-  // Parallelle illustrasjoner — vi kjører bare det antallet vi trenger.
-  // Sporer feil så kalleren kan returnere status til klienten via header.
   let firstIllustratorError: string | null = null;
   const illustrations: Array<{ buffer: Buffer; mimeType: string } | null> = await Promise.all(
     prompts.map(async (prompt) => {
@@ -464,11 +558,17 @@ export async function buildExperiencePptx(args: {
   );
   const succeededCount = illustrations.filter((x) => x !== null).length;
 
-  // Map illustrasjon til riktig innholdsside ut fra bilde-flags
+  // Bygg bilde-queue: bruker-bilder først, deretter AI-illustrasjoner
+  const imageQueue: Array<{ buffer: Buffer; mimeType: string } | null> = [
+    ...userImages.slice(0, userImageCount).map((u) => ({ buffer: u.buffer, mimeType: u.mimeType })),
+    ...illustrations,
+  ];
+
+  // Map til innholdsslider basert på bilde-flags
   const slideImages: Array<{ buffer: Buffer; mimeType: string } | null> = [];
   let nextImg = 0;
   for (const showImage of slidesWithImageFlags) {
-    slideImages.push(showImage ? (illustrations[nextImg++] ?? null) : null);
+    slideImages.push(showImage ? (imageQueue[nextImg++] ?? null) : null);
   }
 
   const dateLabel = args.startedAt

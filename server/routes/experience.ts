@@ -470,7 +470,7 @@ export function registerExperienceRoutes(app: Express) {
       if (!session) return res.status(404).json({ error: "Ikke funnet" });
 
       // Samle kontekst i parallell
-      const [attachments, seriesRow, openLessons] = await Promise.all([
+      const [attachments, seriesRow, openLessons, currentSessionLessons] = await Promise.all([
         storage.getExperienceAttachments(userId, id),
         session.seriesId ? storage.getExperienceSeriesById(userId, session.seriesId) : Promise.resolve(undefined),
         session.seriesId
@@ -480,6 +480,9 @@ export function registerExperienceRoutes(app: Express) {
               ),
             )
           : Promise.resolve([] as any[]),
+        // ALLE lærdommer som allerede er lagret fra DENNE sesjonen — AI må
+        // se disse for å unngå å foreslå duplikater på andre kjøring.
+        storage.getLessonsForSession(userId, id),
       ]);
 
       // Hent relevant tidligere kunnskap via RAG. Bruk møtetittel + første
@@ -515,6 +518,7 @@ export function registerExperienceRoutes(app: Express) {
         context: {
           attachments,
           openLessonsInSeries: openLessons,
+          alreadySavedFromThisSession: currentSessionLessons,
           priorKnowledge,
           seriesName: seriesRow?.name ?? null,
           seriesDescription: seriesRow?.description ?? null,
@@ -577,10 +581,30 @@ export function registerExperienceRoutes(app: Express) {
       const opts = bodySchema.parse(req.body ?? {});
 
       const lessons = await storage.getLessonsForSession(userId, id);
+      const attachmentsLight = await storage.getExperienceAttachments(userId, id);
+
+      // Hent full attachment-data (inkl. image_data) for bilde-vedlegg så
+      // PPTX-bygget kan embed-e dem. Tekst-vedlegg trenger vi ikke bytes
+      // for — bare metadata-en som allerede er med.
+      const imageAttachments = await Promise.all(
+        attachmentsLight
+          .filter((a) => a.mimeType?.startsWith("image/"))
+          .map((a) => storage.getExperienceAttachment(userId, a.id)),
+      );
+      const userImages = imageAttachments
+        .filter((a): a is NonNullable<typeof a> => !!a && !!a.imageData)
+        .map((a) => ({
+          filename: a.filename,
+          mimeType: a.mimeType,
+          buffer: Buffer.from(a.imageData!, "base64"),
+          extractedText: a.extractedText,
+        }));
+
       const { buffer, filename, illustratorStats } = await buildExperiencePptx({
         userId,
         transcript: session.transcript ?? [],
         lessons,
+        userImages,
         meetingTitle: session.title,
         topic: session.topic,
         startedAt: session.startedAt,
