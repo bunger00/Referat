@@ -282,7 +282,7 @@ function UploadCard() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.xlsx,.xls,.txt,image/*"
+            accept=".pdf,.docx,.xlsx,.xls,.txt,image/*,.heic,.heif"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
